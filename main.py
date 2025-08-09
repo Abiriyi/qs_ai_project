@@ -2,12 +2,11 @@ from pdf_parser import extract_pdf_text
 from boq_generator import generate_boq_excel
 
 if __name__ == "__main__":
-    pdf_path = "assets/floorplan.pdf"
-    room_data = extract_pdf_text(pdf_path)
+    pdf_path = "assets/sample_drawing.pdf"
 
-    print("\n📏 Room Areas:")
-    for r in room_data:
-        print(f"{r['room']} — {r['area_m2']} m² (L: {r['length_mm']} mm, W: {r['width_mm']} mm)")
+    location = input("Enter project location for pricing (e.g., Nairobi): ").strip()
 
-    # Generate Excel BoQ
-    generate_boq_excel(room_data)
+    output = extract_pdf_text(pdf_path)
+    generate_boq_excel(output, "boq_output.xlsx", location)
+
+    print("✅ BoQ generated with location-specific pricing.")
