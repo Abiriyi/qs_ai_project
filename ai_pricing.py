@@ -3,7 +3,7 @@ import openai
 
 # Set your API key in environment: export OPENAI_API_KEY='your_key_here'
 
-def get_rate_from_library(element, description, unit):
+def get_rate_from_library(element, description, unit, location=None):
     try:
         df = pd.read_csv("rate_library.csv")
         match = df[

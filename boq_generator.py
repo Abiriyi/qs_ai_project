@@ -16,7 +16,7 @@ TRADE_MAP = {
     # Later: Add MEP, Joinery, Structural, etc.
 }
 
-def generate_boq_excel(boq_entries, output_path, location="Nairobi"):
+def generate_boq_excel(boq_entries, output_path, location="Nigeria"):
     rows = []
     for entry in boq_entries:
         # Skip unwanted items
