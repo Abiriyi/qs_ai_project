@@ -2,60 +2,53 @@ import pdfplumber
 import re
 from math import sqrt
 
-def distance(a, b):
-    return sqrt((a["x"] - b["x"])**2 + (a["y"] - b["y"])**2)
-
 def extract_pdf_text(pdf_path):
-    room_names = []
-    dimensions = []
-
-    room_keywords = [
-        "living", "bedroom", "kitchen", "bath", "store", "dining", "foyer", "passage", "master", "madam", "children", "ent"
-    ]
+    """
+    Extract rooms with calculated area & perimeter from a floor plan PDF.
+    Returns: list of dicts with Room, Area (m²), Perimeter (m)
+    """
+    rooms_data = []
 
     with pdfplumber.open(pdf_path) as pdf:
-        for i, page in enumerate(pdf.pages):
-            words = page.extract_words()
-            for word in words:
-                text = word['text'].strip().lower()
-                pos = {"x": word['x0'], "y": word['top'], "page": i + 1}
+        for page_num, page in enumerate(pdf.pages, start=1):
+            text = page.extract_text() or ""
+            lines = text.split("\n")
 
-                if any(k in text for k in room_keywords):
-                    room_names.append({**pos, "room": text})
+            current_room = None
+            length = None
+            width = None
 
-                if re.fullmatch(r"\d{3,5}", text):
-                    val = int(text)
-                    if 500 <= val <= 30000:
-                        dimensions.append({**pos, "value": val})
+            for line in lines:
+                # Try to detect room name (very simple rule: words with letters)
+                if re.match(r"^[A-Za-z].*", line):
+                    current_room = line.strip()
 
-    # Associate dimensions to rooms
-    associated = []
-    for room in room_names:
-        same_page_dims = [d for d in dimensions if d["page"] == room["page"]]
-        dists = sorted(same_page_dims, key=lambda d: distance(room, d))
-        unique_dims = []
-        seen = set()
-        for d in dists:
-            if d["value"] not in seen:
-                unique_dims.append(d["value"])
-                seen.add(d["value"])
-            if len(unique_dims) == 2:
-                break
+                # Detect a dimension (e.g., '4500 mm' or '4.5 m')
+                dim_match = re.findall(r"(\d+(?:\.\d+)?)\s*(mm|m)\b", line)
+                if dim_match:
+                    # Convert to meters
+                    dims_in_m = []
+                    for value, unit in dim_match:
+                        val = float(value)
+                        if unit == "mm":
+                            val /= 1000.0
+                        dims_in_m.append(val)
 
-        if len(unique_dims) == 2:
-            length, width = sorted(unique_dims, reverse=True)
-            area = round((length * width) / 1_000_000, 2)  # m²
-        else:
-            length, width, area = None, None, None
+                    if len(dims_in_m) == 2:
+                        length, width = dims_in_m
+                        area = round(length * width, 2)
+                        perimeter = round(2 * (length + width), 2)
 
-        associated.append({
-            "room": room["room"].title(),
-            "page": room["page"],
-            "length_mm": length,
-            "width_mm": width,
-            "area_m2": area
-        })
+                        if current_room:
+                            rooms_data.append({
+                                "Room": current_room,
+                                "Area": area,
+                                "Perimeter": perimeter
+                            })
+                            current_room = None
+                            length = None
+                            width = None
 
-    return associated
+    return rooms_data
 
 
