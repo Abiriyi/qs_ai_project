@@ -3,7 +3,7 @@ from parse_floorplan import build_boq_entries
 from boq_generator import generate_boq_excel
 
 if __name__ == "__main__":
-    pdf_path = "assets/sample_drawing.pdf"
+    pdf_path = "assets/floorplan.pdf"
     location = input("Enter project location for pricing (e.g., Abuja): ").strip()
 
     # Step 1: Extract rooms + measurements
