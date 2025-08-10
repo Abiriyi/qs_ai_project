@@ -17,7 +17,7 @@ def get_rate_from_library(element, description, unit, location=None):
         pass
     return None
 
-def get_rate_from_ai(element, description, unit, location="Nigeria"):
+def get_rate_from_ai(element, description, unit, location="Abuja"):
     prompt = f"""
     You are a quantity surveyor. Provide a realistic market unit rate for the following BoQ item:
 
