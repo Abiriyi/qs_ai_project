@@ -8,25 +8,34 @@ load_dotenv()
 if __name__ == "__main__":
     pdf_files = [
         "assets/floorplan.pdf",
-        "assets/Section_X-X.pdf"
+        "assets/Section_X-X.pdf",
+        "assets/Doors and windows schedule.pdf"
     ]
 
     location = input("Enter project location for pricing (e.g., Nairobi): ").strip()
-    all_boq_entries = []
+
+    merged_data = {
+        "rooms": [],
+        "heights": [],
+        "openings": []
+    }
 
     for pdf_path in pdf_files:
         print(f"📄 Processing {pdf_path} ...")
         parsed_data = extract_pdf_text(pdf_path)
 
-        if not parsed_data["rooms"] and not parsed_data["heights"]:
-            print(f"⚠️ No data detected in {pdf_path}. Skipping...")
-            continue
+        # Merge parsed results
+        merged_data["rooms"].extend(parsed_data.get("rooms", []))
+        merged_data["heights"].extend(parsed_data.get("heights", []))
+        merged_data["openings"].extend(parsed_data.get("openings", []))
 
-        boq_entries = build_boq_entries(parsed_data)
-        all_boq_entries.extend(boq_entries)
-
-    if not all_boq_entries:
-        print("❌ No BoQ entries found from any PDF.")
+    if not merged_data["rooms"] and not merged_data["heights"]:
+        print("❌ No usable data found in any PDF.")
     else:
-        print(f"✅ Found {len(all_boq_entries)} BoQ entries from all drawings.")
-        generate_boq_excel(all_boq_entries, "boq_output.xlsx", location)
+        boq_entries = build_boq_entries(merged_data)
+        if boq_entries:
+            print(f"✅ Generated {len(boq_entries)} BoQ entries.")
+            generate_boq_excel(boq_entries, "boq_output.xlsx")
+            print("📄 BoQ saved to boq_output.xlsx")
+        else:
+            print("⚠️ No BoQ entries generated from parsed data.")
