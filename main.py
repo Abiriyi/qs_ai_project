@@ -1,18 +1,32 @@
 from pdf_parser import extract_pdf_text
 from parse_floorplan import build_boq_entries
 from boq_generator import generate_boq_excel
+from dotenv import load_dotenv
+
+load_dotenv()
 
 if __name__ == "__main__":
-    pdf_path = "assets/floorplan.pdf"
-    location = input("Enter project location for pricing (e.g., Abuja): ").strip()
+    pdf_files = [
+        "assets/floorplan.pdf",
+        "assets/Section_X-X.pdf"
+    ]
 
-    # Step 1: Extract rooms + measurements
-    rooms_data = extract_pdf_text(pdf_path)
+    location = input("Enter project location for pricing (e.g., Nairobi): ").strip()
+    all_boq_entries = []
 
-    # Step 2: Build BoQ entries with all keys
-    boq_entries = build_boq_entries(rooms_data)
+    for pdf_path in pdf_files:
+        print(f"📄 Processing {pdf_path} ...")
+        parsed_data = extract_pdf_text(pdf_path)
 
-    # Step 3: Generate BoQ Excel
-    generate_boq_excel(boq_entries, "boq_output.xlsx", location)
+        if not parsed_data["rooms"] and not parsed_data["heights"]:
+            print(f"⚠️ No data detected in {pdf_path}. Skipping...")
+            continue
 
-    print("✅ BoQ generated with location-specific pricing.")
+        boq_entries = build_boq_entries(parsed_data)
+        all_boq_entries.extend(boq_entries)
+
+    if not all_boq_entries:
+        print("❌ No BoQ entries found from any PDF.")
+    else:
+        print(f"✅ Found {len(all_boq_entries)} BoQ entries from all drawings.")
+        generate_boq_excel(all_boq_entries, "boq_output.xlsx", location)

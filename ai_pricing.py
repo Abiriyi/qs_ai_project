@@ -1,41 +1,68 @@
-import pandas as pd
-import openai
+import os
+from openai import OpenAI
 
-# Set your API key in environment: export OPENAI_API_KEY='your_key_here'
+# Initialize OpenAI client
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-def get_rate_from_library(element, description, unit, location=None):
+def get_rate_from_ai(element, description, unit, location=""):
+    """
+    Uses GPT model to suggest a unit rate based on BoQ item description.
+    """
+    prompt = f"""
+    You are a professional Quantity Surveyor familiar with {location} construction market rates.
+    Provide a realistic unit rate for the following BoQ item:
+    Element: {element}
+    Description: {description}
+    Unit: {unit}
+    Output ONLY the number without currency symbol or extra text.
+    """
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",  # Faster, cheaper model; change to "gpt-4" if needed
+            messages=[
+                {"role": "system", "content": "You are a helpful QS assistant providing accurate construction unit rates."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.2
+        )
+
+        rate_str = response.choices[0].message.content.strip()
+
+        # Try to convert to float
+        try:
+            rate = float(rate_str)
+        except ValueError:
+            print(f"⚠️ Could not parse AI rate: {rate_str}")
+            rate = None
+
+        return rate
+
+    except Exception as e:
+        print(f"AI pricing error: {e}")
+        return None
+
+
+def get_rate_from_library(element, description, unit):
+    """
+    Look up rate from a local CSV library (rate_library.csv).
+    """
+    import pandas as pd
+
     try:
         df = pd.read_csv("rate_library.csv")
         match = df[
             (df["Element"].str.lower() == element.lower()) &
-            (df["Description"].str.lower() == description.lower()) &
             (df["Unit"].str.lower() == unit.lower())
         ]
+
         if not match.empty:
             return float(match.iloc[0]["Rate"])
+
     except FileNotFoundError:
-        pass
+        print("⚠️ rate_library.csv not found.")
+    except Exception as e:
+        print(f"Error reading rate library: {e}")
+
     return None
 
-def get_rate_from_ai(element, description, unit, location="Abuja"):
-    prompt = f"""
-    You are a quantity surveyor. Provide a realistic market unit rate for the following BoQ item:
-
-    Element: {element}
-    Description: {description}
-    Unit: {unit}
-    Location: {location}
-
-    Respond with only the numeric rate value in {unit}, without currency symbols.
-    """
-    try:
-        response = openai.ChatCompletion.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0
-        )
-        rate_text = response.choices[0].message["content"].strip()
-        return float(rate_text)
-    except Exception as e:
-        print(f"AI pricing error: {e}")
-        return None
