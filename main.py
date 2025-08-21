@@ -16,7 +16,7 @@ if __name__ == "__main__":
     # Doors & windows schedule PDF
     openings_schedule_pdf = "assets/Doors and windows schedule.pdf"
 
-    location = input("Enter project location for pricing (e.g., Nairobi): ").strip()
+    location = input("Enter project location for pricing (e.g., Abuja): ").strip()
     all_boq_entries = []
 
     # Parse openings schedule
