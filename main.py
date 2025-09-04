@@ -7,15 +7,14 @@ from dotenv import load_dotenv
 load_dotenv()
 
 if __name__ == "__main__":
-    # Main architectural + section drawings
+    # Input files
     pdf_files = [
         "assets/floorplan.pdf",
         "assets/Section_X-X.pdf"
     ]
-
-    # Doors & windows schedule PDF
     openings_schedule_pdf = "assets/Doors and windows schedule.pdf"
 
+    # Location input
     location = input("Enter project location for pricing (e.g., Abuja): ").strip()
     all_boq_entries = []
 
@@ -23,7 +22,7 @@ if __name__ == "__main__":
     print(f"📄 Parsing openings schedule: {openings_schedule_pdf} ...")
     openings_lib = parse_opening_schedule(openings_schedule_pdf, verbose=True)
 
-    # Process each architectural / section PDF
+    # Process each architectural/section PDF
     for pdf_path in pdf_files:
         print(f"📄 Processing {pdf_path} ...")
         parsed_data = extract_pdf_text(pdf_path)
@@ -32,23 +31,22 @@ if __name__ == "__main__":
             print(f"⚠️ No data detected in {pdf_path}. Skipping...")
             continue
 
-        # Merge openings_lib into parsed_data["openings"]
-        # Convert openings_lib (dict) into list format expected by build_boq_entries
-        openings_list = []
-        for tag, data in openings_lib.items():
-            openings_list.append({
+        # Convert openings_lib to list format
+        openings_list = [
+            {
                 "tag": tag,
                 "count": data["count"],
                 "width_m": data["width_m"],
                 "height_m": data["height_m"],
-                "x": 0,  # Schedule doesn’t give coordinates
+                "x": 0,
                 "y": 0,
-                "page": 1  # Default to page 1 for now
-            })
-
+                "page": 1
+            }
+            for tag, data in openings_lib.items()
+        ]
         parsed_data["openings"].extend(openings_list)
 
-        # Build BoQ entries from this PDF's parsed data
+        # Build BoQ entries
         boq_entries = build_boq_entries(parsed_data)
         all_boq_entries.extend(boq_entries)
 
@@ -56,6 +54,9 @@ if __name__ == "__main__":
         print("❌ No BoQ entries found from any PDF.")
     else:
         print(f"✅ Found {len(all_boq_entries)} BoQ entries from all drawings.")
-        generate_boq_excel(all_boq_entries, "boq_output.xlsx", location)
+        # Export both versions
+        generate_boq_excel(all_boq_entries, "boq_plain.xlsx", location, mode="plain")
+        generate_boq_excel(all_boq_entries, "boq_styled.xlsx", location, mode="styled")
+
 
 

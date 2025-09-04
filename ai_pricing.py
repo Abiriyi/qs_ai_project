@@ -1,11 +1,16 @@
+# ai_pricing.py
 import os
 import re
 from openai import OpenAI
 import pandas as pd
 
+# Initialize OpenAI client
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 def get_rate_from_ai(element, description, unit, location="local"):
+    """
+    Query GPT to suggest a unit rate for a BoQ item.
+    """
     prompt = f"""
     You are a professional Quantity Surveyor familiar with {location} construction market rates.
     Provide a realistic unit rate for the following BoQ item:
@@ -17,7 +22,7 @@ def get_rate_from_ai(element, description, unit, location="local"):
 
     try:
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-3.5-turbo",  # ✅ using your available model
             messages=[
                 {"role": "system", "content": "You are a helpful QS assistant providing accurate construction unit rates."},
                 {"role": "user", "content": prompt}
@@ -26,7 +31,7 @@ def get_rate_from_ai(element, description, unit, location="local"):
         )
 
         rate_str = response.choices[0].message.content.strip()
-        rate_str = re.sub(r"[^\d.]", "", rate_str)  # Remove currency symbols, text
+        rate_str = re.sub(r"[^\d.]", "", rate_str)  # remove any currency/text
 
         try:
             return float(rate_str)
@@ -38,7 +43,11 @@ def get_rate_from_ai(element, description, unit, location="local"):
         print(f"AI pricing error: {e}")
         return None
 
+
 def get_rate_from_library(element, description, unit):
+    """
+    Look up rate from a local CSV (rate_library.csv).
+    """
     try:
         df = pd.read_csv("rate_library.csv")
         match = df[
@@ -53,4 +62,5 @@ def get_rate_from_library(element, description, unit):
         print(f"Error reading rate library: {e}")
 
     return None
+
     
