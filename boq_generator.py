@@ -17,6 +17,24 @@ TRADE_MAP = {
     # Later: Add MEP, Joinery, Structural, etc.
 }
 
+# Plural forms for top-level WorkSections
+WORKSECTION_PLURAL_MAP = {
+    "Finish": "Finishes",
+    "Finishes": "Finishes",
+    "General Work": "General Works",
+    "General Works": "General Works",
+    "Structure": "Structures",
+    "Substructure": "Substructures"
+}
+
+# Plural forms for sub-sections
+SUBSECTION_PLURAL_MAP = {
+    "Floor Finish": "Floor Finishes",
+    "Wall Finish": "Wall Finishes",
+    "Ceiling Finish": "Ceiling Finishes",
+    "Skirting": "Skirtings"
+}
+
 # Default fallback rates if library + AI fail
 DEFAULT_RATES = {
     "Floor Finish": 15000,
@@ -26,37 +44,58 @@ DEFAULT_RATES = {
 }
 
 def prepare_boq_entries(boq_entries, location):
-    """Process raw boq_entries, add rates & amounts."""
-    rows = []
+    """Process raw boq_entries, clean descriptions, add rates & amounts, and merge duplicates."""
+    merged = {}
+
     for entry in boq_entries:
+        # Skip unwanted items
         if any(term.lower() in entry.get("Room", "").lower() for term in EXCLUDE_TERMS):
             continue
 
         trade_section = TRADE_MAP.get(entry.get("Element", ""), "General Works")
+        trade_section = WORKSECTION_PLURAL_MAP.get(trade_section, trade_section)  # pluralize
+
         element = entry.get("Element", "")
+        subsection = SUBSECTION_PLURAL_MAP.get(element, element)  # pluralize
+
         description = entry.get("Description", "")
         unit = entry.get("Unit", "")
         qty = entry.get("Quantity", 0)
 
+        # 🔹 Remove room names from description
+        room_name = entry.get("Room", "")
+        if room_name:
+            description = description.replace(f" to {room_name}", "")
+            description = description.replace(f" in {room_name}", "")
+        description = description.strip()
+
+        # Step 1 — Try library rates
         rate = get_rate_from_library(element, description, unit)
         if rate is None:
             rate = get_rate_from_ai(element, description, unit, location)
         if rate is None:
             rate = DEFAULT_RATES.get(element, 0)
 
-        amount = round(rate * qty, 2) if rate else ""
+        # 🔹 Use a composite key to detect duplicates
+        key = (trade_section, element, description, unit, rate)
 
-        rows.append({
-            "WorkSection": trade_section,
-            "SubSection": element,
-            "Description": description,
-            "Unit": unit,
-            "Qty": qty,
-            "Rate": rate,
-            "Amount": amount
-        })
-    return rows
+        if key not in merged:
+            merged[key] = {
+                "WorkSection": trade_section,
+                "SubSection": subsection,
+                "Description": description,
+                "Unit": unit,
+                "Qty": qty,
+                "Rate": rate,
+                "Amount": round(rate * qty, 2) if rate else 0
+            }
+        else:
+            # Sum up quantities and recalc amount
+            merged[key]["Qty"] += qty
+            merged[key]["Amount"] = round(merged[key]["Rate"] * merged[key]["Qty"], 2)
 
+    # Convert dict back to list
+    return list(merged.values())
 
 def generate_boq_excel(boq_entries, output_path, location, mode="plain"):
     """
@@ -99,22 +138,22 @@ def generate_boq_excel(boq_entries, output_path, location, mode="plain"):
             subsection = entry["SubSection"]
 
             # Section header
+            # Section header
             if section != current_section:
-                ws.merge_cells(start_row=row_num, start_column=1, end_row=row_num, end_column=6)
-                ws.cell(row=row_num, column=1, value=section).font = Font(bold=True, size=12)
-                ws.cell(row=row_num, column=1).alignment = Alignment(horizontal="left")
+                ws.merge_cells(start_row=row_num, start_column=2, end_row=row_num, end_column=6)  # 👈 shift to col 2
+                ws.cell(row=row_num, column=2, value=section).font = Font(bold=True, size=12)
+                ws.cell(row=row_num, column=2).alignment = Alignment(horizontal="left")
                 row_num += 1
                 current_section = section
                 current_subsection = None
 
             # Subsection header
             if subsection != current_subsection:
-                ws.merge_cells(start_row=row_num, start_column=1, end_row=row_num, end_column=6)
-                ws.cell(row=row_num, column=1, value=subsection).font = Font(bold=True, italic=True)
-                ws.cell(row=row_num, column=1).alignment = Alignment(horizontal="left")
+                ws.merge_cells(start_row=row_num, start_column=2, end_row=row_num, end_column=6)  # 👈 shift to col 2
+                ws.cell(row=row_num, column=2, value=subsection).font = Font(bold=True, italic=True)
+                ws.cell(row=row_num, column=2).alignment = Alignment(horizontal="left")
                 row_num += 1
                 current_subsection = subsection
-                item_counter = 0
 
             # Item row
             item_counter += 1
