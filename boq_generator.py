@@ -133,11 +133,97 @@ WORKSECTIONS_ORDER = [
 ]
 
 # Default fallback rates if library + AI fail
+# Default fallback rates if library + AI fail (₦ per unit)
 DEFAULT_RATES = {
-    "Floor Finish": 15000,
-    "Wall Finish": 12000,
-    "Ceiling Finish": 10000,
-    "Skirting": 2500,
+    # 1. Preliminaries
+    "Site Establishment": 500000,        # lump sum
+    "Temporary Works": 300000,
+    "Site Management": 400000,
+
+    # 2. Substructure Works
+    "Site Clearance": 1500,              # per m²
+    "Excavation": 2000,                  # per m³
+    "Earthworks": 2500,                  # per m³
+    "Foundations": 30000,                # per m³ concrete
+    "Basement": 50000,                   # per m³
+    "Ground Floor Slab": 35000,          # per m²
+
+    # 3. Superstructure Works
+    # a. Concrete Work
+    "Concrete": 30000,                   # per m³
+    "Reinforced Concrete": 40000,        # per m³
+
+    # b. Masonry / Blockwork
+    "Masonry": 8000,                     # per m²
+    "Blockwork": 7000,                   # per m²
+    "Partition Walls": 6000,             # per m²
+
+    # c. Structural Steelwork
+    "Steelwork": 50000,                  # per tonne
+    "Structural Steel": 55000,           # per tonne
+    "Roof Trusses": 20000,               # per m² plan area
+
+    # d. Roofing
+    "Roof Structure": 25000,             # per m²
+    "Roof Coverings": 20000,             # per m²
+
+    # e. Carpentry & Joinery
+    "Carpentry": 15000,                  # per m² or lump sum
+    "Joinery": 12000,
+    "Doors": 45000,                      # per door
+    "Windows": 40000,                    # per window
+    "Frames": 10000,                     # per m
+    "Skirting": 2500,                    # per m
+
+    # 4. Finishes
+    "Plastering": 12000,                 # per m²
+    "Screeding": 11000,                  # per m²
+    "Tiling": 15000,                     # per m²
+    "Painting": 8000,                    # per m²
+    "Decoration": 10000,                 # per m²
+    "Floor Finish": 15000,               # per m²
+    "Wall Finish": 12000,                # per m²
+    "Ceiling Finish": 10000,             # per m²
+
+    # 5. Fittings & Fixtures
+    "Ironmongery": 5000,                 # per set
+    "Cabinets": 80000,                   # per cabinet
+    "Wardrobes": 100000,                 # per wardrobe
+    "Shelves": 15000,                    # per shelf
+    "Sanitary Fittings": 60000,          # per fitting
+    "Kitchen Fittings": 120000,          # per kitchen set
+
+    # 6. Mechanical & Electrical Works (MEP)
+    # a. Mechanical
+    "Plumbing": 20000,                   # per point
+    "Drainage": 15000,                   # per point
+    "Sanitary Installations": 50000,     # per fitting
+    "HVAC": 300000,                      # per system unit
+    "Fire Protection": 100000,           # per installation
+
+    # b. Electrical
+    "Power Supply": 80000,               # per panel
+    "Lighting": 5000,                    # per fitting
+    "Small Power": 4000,                 # per point
+    "Data": 6000,                        # per point
+    "Telecom": 8000,                     # per point
+    "CCTV": 15000,                       # per camera
+    "Alarms": 20000,                     # per point
+    "Lightning Protection": 50000,       # per system
+
+    # 7. External Works
+    "Paving": 12000,                     # per m²
+    "Driveways": 15000,                  # per m²
+    "Car Parks": 14000,                  # per m²
+    "Boundary Walls": 20000,             # per m²
+    "Gates": 80000,                      # per gate
+    "Landscaping": 1000,                 # per m²
+    "Surface Water Drainage": 5000,      # per m
+    "External Services": 50000,          # per connection
+
+    # 8. Provisional & Prime Cost Sums
+    "Specialized Works": 1000000,        # lump sum
+    "Contingencies": 500000,             # lump sum
 }
 
 def prepare_boq_entries(boq_entries, location):
