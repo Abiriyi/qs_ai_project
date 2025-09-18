@@ -9,12 +9,97 @@ from ai_pricing import get_rate_from_library, get_rate_from_ai
 EXCLUDE_TERMS = ["residential", "development"]
 
 # Map BoQ elements to BESMM4 work sections
+# Map BoQ elements to BESMM4 / trade work sections
 TRADE_MAP = {
+    # 1. Preliminaries
+    "Site Establishment": "Preliminaries",
+    "Temporary Works": "Preliminaries",
+    "Site Management": "Preliminaries",
+
+    # 2. Substructure Works
+    "Site Clearance": "Substructure Works",
+    "Excavation": "Substructure Works",
+    "Earthworks": "Substructure Works",
+    "Foundations": "Substructure Works",
+    "Basement": "Substructure Works",
+    "Ground Floor Slab": "Substructure Works",
+
+    # 3. Superstructure Works
+    # a. Concrete Work
+    "Concrete": "Superstructure Works",
+    "Reinforced Concrete": "Superstructure Works",
+
+    # b. Masonry / Blockwork
+    "Masonry": "Superstructure Works",
+    "Blockwork": "Superstructure Works",
+    "Partition Walls": "Superstructure Works",
+
+    # c. Structural Steelwork
+    "Steelwork": "Superstructure Works",
+    "Structural Steel": "Superstructure Works",
+    "Roof Trusses": "Superstructure Works",
+
+    # d. Roofing
+    "Roof Structure": "Superstructure Works",
+    "Roof Coverings": "Superstructure Works",
+
+    # e. Carpentry & Joinery
+    "Carpentry": "Superstructure Works",
+    "Joinery": "Superstructure Works",
+    "Doors": "Superstructure Works",
+    "Windows": "Superstructure Works",
+    "Frames": "Superstructure Works",
+    "Skirting": "Superstructure Works",
+
+    # 4. Finishes
+    "Plastering": "Finishes",
+    "Screeding": "Finishes",
+    "Tiling": "Finishes",
+    "Painting": "Finishes",
+    "Decoration": "Finishes",
     "Floor Finish": "Finishes",
     "Wall Finish": "Finishes",
     "Ceiling Finish": "Finishes",
-    "Skirting": "Finishes",
-    # Later: Add MEP, Joinery, Structural, etc.
+
+    # 5. Fittings & Fixtures
+    "Ironmongery": "Fittings & Fixtures",
+    "Cabinets": "Fittings & Fixtures",
+    "Wardrobes": "Fittings & Fixtures",
+    "Shelves": "Fittings & Fixtures",
+    "Sanitary Fittings": "Fittings & Fixtures",
+    "Kitchen Fittings": "Fittings & Fixtures",
+
+    # 6. Mechanical & Electrical Works (MEP)
+    # a. Mechanical
+    "Plumbing": "Mechanical & Electrical Works",
+    "Drainage": "Mechanical & Electrical Works",
+    "Sanitary Installations": "Mechanical & Electrical Works",
+    "HVAC": "Mechanical & Electrical Works",
+    "Fire Protection": "Mechanical & Electrical Works",
+
+    # b. Electrical
+    "Power Supply": "Mechanical & Electrical Works",
+    "Lighting": "Mechanical & Electrical Works",
+    "Small Power": "Mechanical & Electrical Works",
+    "Data": "Mechanical & Electrical Works",
+    "Telecom": "Mechanical & Electrical Works",
+    "CCTV": "Mechanical & Electrical Works",
+    "Alarms": "Mechanical & Electrical Works",
+    "Lightning Protection": "Mechanical & Electrical Works",
+
+    # 7. External Works
+    "Paving": "External Works",
+    "Driveways": "External Works",
+    "Car Parks": "External Works",
+    "Boundary Walls": "External Works",
+    "Gates": "External Works",
+    "Landscaping": "External Works",
+    "Surface Water Drainage": "External Works",
+    "External Services": "External Works",
+
+    # 8. Provisional & Prime Cost Sums
+    "Specialized Works": "Provisional & Prime Cost Sums",
+    "Contingencies": "Provisional & Prime Cost Sums",
 }
 
 # Plural forms for top-level WorkSections
@@ -34,6 +119,18 @@ SUBSECTION_PLURAL_MAP = {
     "Ceiling Finish": "Ceiling Finishes",
     "Skirting": "Skirtings"
 }
+
+# Ordered list of QS Work Sections for summary
+WORKSECTIONS_ORDER = [
+    "Preliminaries",
+    "Substructure Works",
+    "Superstructure Works",
+    "Finishes",
+    "Fittings & Fixtures",
+    "Mechanical & Electrical Works",
+    "External Works",
+    "Provisional & Prime Cost Sums"
+]
 
 # Default fallback rates if library + AI fail
 DEFAULT_RATES = {
@@ -136,8 +233,7 @@ def generate_boq_excel(boq_entries, output_path, location, mode="plain"):
         for entry in processed_entries:
             section = entry["WorkSection"]
             subsection = entry["SubSection"]
-
-            # Section header
+            
             # Section header
             if section != current_section:
                 ws.merge_cells(start_row=row_num, start_column=2, end_row=row_num, end_column=6)  # 👈 shift to col 2
@@ -175,11 +271,50 @@ def generate_boq_excel(boq_entries, output_path, location, mode="plain"):
 
             row_num += 1
 
-        # Adjust column widths
+                # Adjust column widths
         for col in range(1, 7):
             col_letter = get_column_letter(col)
             ws.column_dimensions[col_letter].width = 18 if col > 2 else 30
 
+        # --- Create Summary Sheet ---
+        ws_summary = wb.create_sheet(title="Summary")
+
+        # Headers
+        headers = ["Work Section", "Total (₦)"]
+        ws_summary.append(headers)
+        for col in range(1, 3):
+            cell = ws_summary.cell(row=1, column=col)
+            cell.font = Font(bold=True)
+            cell.alignment = Alignment(horizontal="center")
+
+        # Calculate totals per section
+        section_totals = {}
+        grand_total = 0
+        for entry in processed_entries:
+            section = entry["WorkSection"].upper()
+            amount = entry["Amount"] or 0
+            section_totals[section] = section_totals.get(section, 0) + amount
+            grand_total += amount
+
+        # Write section totals in QS order (only if non-zero)
+        row_num = 2
+        for section in WORKSECTIONS_ORDER:
+            total = section_totals.get(section.upper(), 0)
+            if total > 0:
+                ws_summary.cell(row=row_num, column=1, value=section.upper()).font = Font(bold=True)
+                amt_cell = ws_summary.cell(row=row_num, column=2, value=total)
+                amt_cell.style = currency_fmt
+                amt_cell.alignment = Alignment(horizontal="right")
+                row_num += 1
+
+        # GRAND TOTAL
+        ws_summary.cell(row=row_num, column=1, value="GRAND TOTAL").font = Font(bold=True, size=12)
+        amt_cell = ws_summary.cell(row=row_num, column=2, value=grand_total)
+        amt_cell.style = currency_fmt
+        amt_cell.alignment = Alignment(horizontal="right")
+        amt_cell.font = Font(bold=True, size=12)
+
+        # Save workbook
         wb.save(output_path)
 
     else:
