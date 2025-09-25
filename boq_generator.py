@@ -109,16 +109,50 @@ WORKSECTION_PLURAL_MAP = {
     "General Work": "General Works",
     "General Works": "General Works",
     "Structure": "Structures",
-    "Substructure": "Substructures"
+    "Structures": "Structures",
+    "Substructure": "Substructures",
+    "Substructures": "Substructures",
+    "Substructure Works": "Substructure Works",
+    "Superstructure Works": "Superstructure Works",
+    "External Work": "External Works",
+    "External Works": "External Works",
+    "Services": "Services",
+    "Preliminaries": "Preliminaries"
 }
 
-# Plural forms for sub-sections
 SUBSECTION_PLURAL_MAP = {
     "Floor Finish": "Floor Finishes",
     "Wall Finish": "Wall Finishes",
     "Ceiling Finish": "Ceiling Finishes",
-    "Skirting": "Skirtings"
+    "Skirting": "Skirtings",
+    "Painting": "Paintings",
+    "Plaster": "Plasters",
+    "Door Finish": "Door Finishes",
+    "Window Finish": "Window Finishes",
+    "Mechanical Service": "Mechanical Services",
+    "Electrical Service": "Electrical Services",
+    "Plumbing Service": "Plumbing Services"
 }
+
+def pluralize_worksection(name: str) -> str:
+    """Return plural form of worksection or 'Unclassified' if missing."""
+    return WORKSECTION_PLURAL_MAP.get(name, "Unclassified")
+
+def pluralize_subsection(name: str) -> str:
+    """Return plural form of subsection or original if not mapped."""
+    return SUBSECTION_PLURAL_MAP.get(name, name)
+
+def generate_boq(items: list[dict]) -> dict:
+    boq = {}
+    for item in items:
+        worksection = pluralize_worksection(item.get("worksection", ""))
+        subsection = pluralize_subsection(item.get("subsection", ""))
+        
+        boq.setdefault(worksection, {})
+        boq[worksection].setdefault(subsection, [])
+        boq[worksection][subsection].append(item)
+    
+    return boq
 
 # Ordered list of QS Work Sections for summary
 WORKSECTIONS_ORDER = [
@@ -236,10 +270,10 @@ def prepare_boq_entries(boq_entries, location):
             continue
 
         trade_section = TRADE_MAP.get(entry.get("Element", ""), "General Works")
-        trade_section = WORKSECTION_PLURAL_MAP.get(trade_section, trade_section)  # pluralize
+        trade_section = pluralize_worksection(trade_section)
 
         element = entry.get("Element", "")
-        subsection = SUBSECTION_PLURAL_MAP.get(element, element)  # pluralize
+        subsection = pluralize_subsection(element)
 
         description = entry.get("Description", "")
         unit = entry.get("Unit", "")
@@ -385,16 +419,16 @@ def generate_boq_excel(boq_entries, output_path, location, mode="plain"):
         # Write section totals in QS order (only if non-zero)
         row_num = 2
         for section in WORKSECTIONS_ORDER:
-            total = section_totals.get(section.upper(), 0)
-            if total > 0:
-                ws_summary.cell(row=row_num, column=1, value=section.upper()).font = Font(bold=True)
+                total = section_totals.get(section.upper(), 0)
+                if total > 0:
+                    ws_summary.cell(row=row_num, column=1, value=section).font = Font(bold=True)
                 amt_cell = ws_summary.cell(row=row_num, column=2, value=total)
                 amt_cell.style = currency_fmt
                 amt_cell.alignment = Alignment(horizontal="right")
                 row_num += 1
 
         # GRAND TOTAL
-        ws_summary.cell(row=row_num, column=1, value="GRAND TOTAL").font = Font(bold=True, size=12)
+        ws_summary.cell(row=row_num,column=1, value="GRAND TOTAL").font = Font(bold=True, size=12)
         amt_cell = ws_summary.cell(row=row_num, column=2, value=grand_total)
         amt_cell.style = currency_fmt
         amt_cell.alignment = Alignment(horizontal="right")
