@@ -166,7 +166,6 @@ WORKSECTIONS_ORDER = [
     "Provisional & Prime Cost Sums"
 ]
 
-# Default fallback rates if library + AI fail
 # Default fallback rates if library + AI fail (₦ per unit)
 DEFAULT_RATES = {
     # 1. Preliminaries

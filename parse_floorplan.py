@@ -1,93 +1,41 @@
 # parse_floorplan.py
 from pdf_parser import extract_pdf_text
-import math
 
-def parse_floorplan(pdf_path, location="Lagos"):
+
+def build_boq_entries(parsed_data, location=None):
     """
-    Parse the floorplan PDF into structured BoQ entries.
-    - Uses per-room dimensions & heights
-    - Deducts openings (doors, windows)
+    Build BoQ entries from parsed PDF data covering all work sections.
     """
-    pdf_data = extract_pdf_text(pdf_path)
-    rooms = pdf_data["rooms"]
-    openings = pdf_data["openings"]
+    rooms = parsed_data.get("rooms", [])
+    openings = parsed_data.get("openings", [])
+    others = parsed_data.get("others", [])
 
     boq_entries = []
 
+    # Finishes, Fittings, and room-based work
     for room in rooms:
         room_name = room.get("Room", "Unknown")
-        length = room.get("Length")
-        width = room.get("Width")
+        area = room.get("Area", 0)
+        perimeter = room.get("Perimeter", 0)
         height = room.get("Height", 3.0)
-        area = room.get("Area")
-        perimeter = room.get("Perimeter")
 
-        # Skip if no dimensions were found
-        if not area or not perimeter:
-            continue
+        if area and perimeter:
+            boq_entries.append({"Room": room_name, "Element": "Floor Finish", "Description": f"Floor tiling to {room_name}", "Unit": "m²", "Quantity": round(area, 2)})
+            boq_entries.append({"Room": room_name, "Element": "Wall Finish", "Description": f"Wall plastering/painting in {room_name}", "Unit": "m²", "Quantity": round(perimeter * height, 2)})
+            boq_entries.append({"Room": room_name, "Element": "Ceiling Finish", "Description": f"Ceiling finish to {room_name}", "Unit": "m²", "Quantity": round(area, 2)})
+            boq_entries.append({"Room": room_name, "Element": "Skirting", "Description": f"Skirting to {room_name}", "Unit": "m", "Quantity": round(perimeter, 2)})
 
-        # --- Calculate total opening area for this room ---
-        opening_area = 0
         for o in openings:
-            if o["width_m"] and o["height_m"]:
-                opening_area += o["count"] * o["width_m"] * o["height_m"]
+            boq_entries.append({"Room": room_name, "Element": "Windows" if o["tag"].startswith("W") else "Doors", "Description": f"{o['tag']} in {room_name} ({o['count']} no.)", "Unit": "No.", "Quantity": o["count"]})
 
-        # --- Floor finishes ---
-        boq_entries.append({
-            "Room": room_name,
-            "Element": "Floor Finish",
-            "Description": f"Floor finish to {room_name}",
-            "Unit": "m²",
-            "Quantity": round(area, 2)
-        })
+    # Add heuristic detections
+    boq_entries.extend(others)
 
-        # --- Wall finishes (net of openings) ---
-        wall_area = max(perimeter * height - opening_area, 0)
-        boq_entries.append({
-            "Room": room_name,
-            "Element": "Wall Finish",
-            "Description": f"Wall finish to {room_name}",
-            "Unit": "m²",
-            "Quantity": round(wall_area, 2)
-        })
-
-        # --- Ceiling finishes (same as floor area) ---
-        boq_entries.append({
-            "Room": room_name,
-            "Element": "Ceiling Finish",
-            "Description": f"Ceiling finish to {room_name}",
-            "Unit": "m²",
-            "Quantity": round(area, 2)
-        })
-
-        # --- Skirting (assume perimeter skirting) ---
-        boq_entries.append({
-            "Room": room_name,
-            "Element": "Skirting",
-            "Description": f"Skirting to {room_name}",
-            "Unit": "m",
-            "Quantity": round(perimeter, 2)
-        })
-
-        # --- Openings (windows/doors) ---
-        for o in openings:
-            if o["width_m"] and o["height_m"]:
-                opening_area = round(o["width_m"] * o["height_m"], 2)
-                boq_entries.append({
-                    "Room": room_name,
-                    "Element": "Windows" if o["tag"].startswith("W") else "Doors",
-                    "Description": f"{o['tag']} in {room_name} ({o['count']} no.)",
-                    "Unit": "No.",
-                    "Quantity": o["count"]
-                })
+    # Add preliminaries and provisional sums as placeholders
+    boq_entries.append({"Room": None, "Element": "Preliminaries", "Description": "Site establishment, preliminaries", "Unit": "Item", "Quantity": 1})
+    boq_entries.append({"Room": None, "Element": "Provisional & Prime Cost Sums", "Description": "Provisional sum (allowance)", "Unit": "Item", "Quantity": 1})
 
     return boq_entries
-
-# Example usage
-if __name__ == "__main__":
-    entries = parse_floorplan("sample_floorplan.pdf")
-    for e in entries:
-        print(e)
 
 
 
