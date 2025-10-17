@@ -1,0 +1,78 @@
+Element,Unit,Rate
+# --- Preliminaries ---
+Site Establishment,Item,500000
+Temporary Works,Item,350000
+Site Management,Item,400000
+
+# --- Substructure Works ---
+Site Clearance,m²,1800
+Excavation,m³,2500
+Earthworks,m³,3000
+Foundations,m³,35000
+Basement,m³,55000
+Ground Floor Slab,m²,38000
+
+# --- Superstructure Works ---
+Concrete,m³,32000
+Reinforced Concrete,m³,42000
+Masonry,m²,8500
+Blockwork,m²,7500
+Partition Walls,m²,7000
+Steelwork,tonne,52000
+Structural Steel,tonne,55000
+Roof Trusses,m²,22000
+Roof Structure,m²,25000
+Roof Coverings,m²,20000
+Carpentry,m²,16000
+Joinery,m²,14000
+Doors,No.,50000
+Windows,No.,42000
+Frames,m,12000
+Skirting,m,3000
+
+# --- Finishes ---
+Plastering,m²,13000
+Screeding,m²,12000
+Tiling,m²,16000
+Painting,m²,8500
+Decoration,m²,10000
+Floor Finish,m²,16000
+Wall Finish,m²,13000
+Ceiling Finish,m²,10000
+
+# --- Fittings & Fixtures ---
+Ironmongery,Set,6000
+Cabinets,No.,85000
+Wardrobes,No.,95000
+Shelves,No.,20000
+Sanitary Fittings,Item,65000
+Kitchen Fittings,Item,120000
+
+# --- Mechanical & Electrical Works ---
+Plumbing,Point,25000
+Drainage,Point,18000
+Sanitary Installations,Item,60000
+HVAC,System,320000
+Fire Protection,Item,110000
+Power Supply,Panel,85000
+Lighting,Point,5500
+Small Power,Point,4500
+Data,Point,6500
+Telecom,Point,8500
+CCTV,Camera,16000
+Alarms,Point,22000
+Lightning Protection,System,55000
+
+# --- External Works ---
+Paving,m²,13000
+Driveways,m²,16000
+Car Parks,m²,15000
+Boundary Walls,m²,23000
+Gates,No.,90000
+Landscaping,m²,1200
+Surface Water Drainage,m,5500
+External Services,Item,55000
+
+# --- Provisional & Prime Cost Sums ---
+Specialized Works,Item,1000000
+Contingencies,Item,500000
