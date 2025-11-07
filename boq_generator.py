@@ -1,240 +1,219 @@
 # boq_generator.py
+"""
+BESMM4-compliant BoQ generator
+------------------------------
+This script:
+1. Loads a BESMM4 CSV template (e.g. qs_ai_project/besmm4_template.csv)
+2. Populates quantities from parsed BoQ entries (from drawings)
+3. Looks up rates via ai_pricing.get_rate_from_library()
+4. Calculates total amounts
+5. Exports to formatted Excel (.xlsx)
+"""
+
+import os
 import pandas as pd
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, NamedStyle
 from openpyxl.utils import get_column_letter
-from ai_pricing import get_rate_from_library, get_rate_from_ai
+from collections import defaultdict
+from ai_pricing import get_rate_from_library
 
-# ===========================
-# 🔹 Configuration
-# ===========================
-EXCLUDE_TERMS = ["residential", "development"]
 
+# ---------------------------------------------
+# SETTINGS
+# ---------------------------------------------
 WORKSECTIONS_ORDER = [
     "Preliminaries",
-    "Substructure Works",
-    "Superstructure Works",
+    "Substructure",
+    "Superstructure",
     "Finishes",
     "Fittings & Fixtures",
     "Mechanical & Electrical Works",
     "External Works",
-    "Provisional & Prime Cost Sums"
+    "Provisional & Prime Cost Sums",
 ]
 
-# Default fallback rates (₦ per unit)
-DEFAULT_RATES = {
-    "Excavation": 2000,
-    "Blockwork": 8000,
-    "Concrete": 30000,
-    "Painting": 8000,
-    "Plastering": 12000,
-    "Doors": 45000,
-    "Windows": 40000,
-    "Floor Finish": 15000,
-    "Tiling": 15000,
-    "Screeding": 11000,
-    "Paving": 12000,
-    "Roof Coverings": 20000,
-    "Plumbing": 20000,
-    "Lighting": 5000,
-    "Sanitary Fittings": 60000,
-}
+DEFAULT_RATE = 0.0
 
-TRADE_MAP = {
-    "Site Clearance": "Substructure Works",
-    "Excavation": "Substructure Works",
-    "Concrete": "Superstructure Works",
-    "Blockwork": "Superstructure Works",
-    "Plastering": "Finishes",
-    "Painting": "Finishes",
-    "Tiling": "Finishes",
-    "Doors": "Superstructure Works",
-    "Windows": "Superstructure Works",
-    "Floor Finish": "Finishes",
-    "Roof Coverings": "Superstructure Works",
-    "Lighting": "Mechanical & Electrical Works",
-    "Plumbing": "Mechanical & Electrical Works",
-    "Sanitary Fittings": "Fittings & Fixtures",
-    "Paving": "External Works",
-}
 
-def pluralize_worksection(name: str) -> str:
-    return {
-        "Preliminary": "Preliminaries",
-        "Substructure": "Substructure Works",
-        "Superstructure": "Superstructure Works",
-        "Finish": "Finishes",
-        "External Work": "External Works",
-    }.get(name, name)
+# ---------------------------------------------
+# TEMPLATE LOADING
+# ---------------------------------------------
+def _load_template(template_path: str) -> pd.DataFrame:
+    if not os.path.exists(template_path):
+        raise FileNotFoundError(f"BESMM4 template not found: {template_path}")
 
-def pluralize_subsection(name: str) -> str:
-    if not name:
-        return name
-    if "finish" in name.lower():
-        return name.title() + "es" if not name.endswith("es") else name.title()
-    return name.title()
+    df = pd.read_csv(template_path)
+    df.columns = [c.strip() for c in df.columns]
 
-# ===========================
-# 🔹 Prepare & Merge BoQ Entries
-# ===========================
-def prepare_boq_entries(boq_entries, location):
-    merged = {}
+    expected = ["Section", "Code", "Description", "Unit", "Element"]
+    for e in expected:
+        if e not in df.columns:
+            raise ValueError(f"Missing column in template CSV: {e}")
 
-    for entry in boq_entries:
-        # Skip irrelevant rooms
-        if any(term.lower() in str(entry.get("Room", "")).lower() for term in EXCLUDE_TERMS):
-            continue
+    df["Quantity"] = 0.0
+    df["Rate"] = 0.0
+    df["Amount"] = 0.0
+    return df
 
-        element = entry.get("Element", "")
-        trade_section = TRADE_MAP.get(element, "General Works")
-        trade_section = pluralize_worksection(trade_section)
-        subsection = pluralize_subsection(element)
 
-        description = entry.get("Description", "").strip()
-        unit = entry.get("Unit", "")
-        qty = entry.get("Quantity", 0) or 0
+# ---------------------------------------------
+# QUANTITY POPULATION LOGIC
+# ---------------------------------------------
+def populate_template_with_quantities(template_df, parsed_entries, location="Kaduna"):
+    """
+    Merge parsed quantities into the BESMM4 template.
+    """
+    if not isinstance(template_df, pd.DataFrame):
+        try:
+            template_df = pd.DataFrame(template_df)
+        except Exception as e:
+            print(f"⚠️ Could not convert template to DataFrame: {e}")
+            return template_df
 
-        # Step 1: Try CSV rates (Kaduna-based, adjusted for location/year)
-        rate = get_rate_from_library(element, description, unit, location)
-        if rate:
-            source = "📘 CSV"
-        else:
-            # Step 2: Try AI (if available)
-            rate = get_rate_from_ai(element, description, unit, location)
-            if rate:
-                source = "🤖 AI"
-            else:
-                # Step 3: Fallback to default
-                rate = DEFAULT_RATES.get(element, 0)
-                source = "⚙️ Default"
+    # Aggregate quantities by element name
+    quantities_by_element = defaultdict(float)
+    for entry in parsed_entries:
+        element = str(entry.get("Element") or "").strip().lower()
+        qty = float(entry.get("Quantity") or 0)
+        if element:
+            quantities_by_element[element] += qty
 
-        # Debug output (only first 10 for clarity)
-        if len(merged) < 10:
-            print(f"➡️ {element}: {rate} ₦/{unit} ({source})")
+    # Update template quantities and get rates
+    for idx, row in template_df.iterrows():
+        desc = str(row.get("Description") or "").lower()
+        element = str(row.get("Element") or "").lower()
+        matched_qty = 0.0
 
-        key = (trade_section, element, description, unit, rate)
-        if key not in merged:
-            merged[key] = {
-                "WorkSection": trade_section,
-                "SubSection": subsection,
-                "Description": description,
-                "Unit": unit,
-                "Qty": qty,
-                "Rate": rate,
-                "Amount": round(rate * qty, 2),
-            }
-        else:
-            merged[key]["Qty"] += qty
-            merged[key]["Amount"] = round(merged[key]["Rate"] * merged[key]["Qty"], 2)
+        # Match if element name or description overlap
+        for elem, qty in quantities_by_element.items():
+            if elem in desc or elem in element:
+                matched_qty = qty
+                break
 
-    return list(merged.values())
+        # Assign matched quantity
+        template_df.at[idx, "Quantity"] = round(matched_qty, 2)
 
-# ===========================
-# 🔹 Excel Export
-# ===========================
-def generate_boq_excel(boq_entries, output_path, location, mode="plain"):
-    processed_entries = prepare_boq_entries(boq_entries, location)
+        # Look up rate
+        rate = get_rate_from_library(row.get("Element", ""), row.get("Description", ""), row.get("Unit", ""), location)
+        if rate is None:
+            rate = DEFAULT_RATE
 
-    if not processed_entries:
-        print("❌ No BoQ entries to export.")
-        return
+        template_df.at[idx, "Rate"] = rate
+        template_df.at[idx, "Amount"] = round(matched_qty * rate, 2)
 
-    if mode == "plain":
-        df = pd.DataFrame(processed_entries)
-        df.insert(0, "Item", [chr(65 + i) for i in range(len(df))])
-        df.to_excel(output_path, index=False, sheet_name="BoQ")
-        print(f"✅ Plain Excel exported: {output_path}")
-        return
+    return template_df
 
+
+# ---------------------------------------------
+# EXCEL EXPORT
+# ---------------------------------------------
+def export_besmm4_excel(populated_df: pd.DataFrame, output_path: str):
     wb = Workbook()
     ws = wb.active
-    ws.title = "BoQ"
+    ws.title = "BESMM4 BoQ"
 
+    # Styles
     currency_fmt = NamedStyle(name="currency_fmt", number_format='"₦"#,##0.00')
     qty_fmt = NamedStyle(name="qty_fmt", number_format="#,##0.##")
 
-    headers = ["Item", "Description", "Unit", "Qty", "Rate (₦)", "Amount (₦)"]
+    headers = ["Code", "Description", "Unit", "Quantity", "Rate (₦)", "Amount (₦)"]
     ws.append(headers)
     for col in range(1, len(headers) + 1):
         cell = ws.cell(row=1, column=col)
         cell.font = Font(bold=True)
         cell.alignment = Alignment(horizontal="center")
 
-    row = 2
-    section = None
-    subsection = None
-    item_counter = 0
+    current_section = None
+    row_idx = 2
 
-    for entry in processed_entries:
-        if entry["WorkSection"] != section:
-            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=6)
-            ws.cell(row=row, column=2, value=entry["WorkSection"]).font = Font(bold=True, size=12)
-            row += 1
-            section = entry["WorkSection"]
-            subsection = None
+    # Group rows by Section
+    grouped = populated_df.groupby("Section", sort=False)
 
-        if entry["SubSection"] != subsection:
-            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=6)
-            ws.cell(row=row, column=2, value=entry["SubSection"]).font = Font(bold=True, italic=True)
-            row += 1
-            subsection = entry["SubSection"]
+    for section, group in grouped:
+        ws.merge_cells(start_row=row_idx, start_column=2, end_row=row_idx, end_column=6)
+        sec_cell = ws.cell(row=row_idx, column=2, value=section)
+        sec_cell.font = Font(bold=True, size=12)
+        sec_cell.alignment = Alignment(horizontal="left")
+        row_idx += 1
 
-        item_counter += 1
-        ws.cell(row=row, column=1, value=chr(64 + item_counter))
-        ws.cell(row=row, column=2, value=entry["Description"])
-        ws.cell(row=row, column=3, value=entry["Unit"])
+        # Write each item under section
+        for _, r in group.iterrows():
+            ws.cell(row=row_idx, column=1, value=r["Code"])
+            ws.cell(row=row_idx, column=2, value=r["Description"])
+            ws.cell(row=row_idx, column=3, value=r["Unit"])
 
-        q_cell = ws.cell(row=row, column=4, value=entry["Qty"])
-        q_cell.style = qty_fmt
-        q_cell.alignment = Alignment(horizontal="right")
+            qcell = ws.cell(row=row_idx, column=4, value=r["Quantity"])
+            qcell.style = qty_fmt
+            qcell.alignment = Alignment(horizontal="right")
 
-        r_cell = ws.cell(row=row, column=5, value=entry["Rate"])
-        r_cell.style = currency_fmt
-        r_cell.alignment = Alignment(horizontal="right")
+            rcell = ws.cell(row=row_idx, column=5, value=r["Rate"])
+            rcell.style = currency_fmt
+            rcell.alignment = Alignment(horizontal="right")
 
-        a_cell = ws.cell(row=row, column=6, value=entry["Amount"])
-        a_cell.style = currency_fmt
-        a_cell.alignment = Alignment(horizontal="right")
+            acell = ws.cell(row=row_idx, column=6, value=r["Amount"])
+            acell.style = currency_fmt
+            acell.alignment = Alignment(horizontal="right")
 
-        row += 1
+            row_idx += 1
 
-    for c in range(1, 7):
-        ws.column_dimensions[get_column_letter(c)].width = 18 if c > 2 else 30
+        # Section subtotal
+        ws.merge_cells(start_row=row_idx, start_column=2, end_row=row_idx, end_column=5)
+        cell = ws.cell(row=row_idx, column=2, value=f"To Collection ({section})")
+        cell.font = Font(italic=True)
+        ws.cell(row=row_idx, column=6, value=sum(group["Amount"]))
+        row_idx += 1
 
-    # --- Summary Sheet ---
-    summary = wb.create_sheet(title="Summary")
-    summary.append(["Work Section", "Total (₦)"])
+    # Add Summary sheet
+    ws_sum = wb.create_sheet("Summary")
+    ws_sum.append(["Work Section", "Total (₦)"])
     for col in range(1, 3):
-        cell = summary.cell(row=1, column=col)
-        cell.font = Font(bold=True)
-        cell.alignment = Alignment(horizontal="center")
+        c = ws_sum.cell(row=1, column=col)
+        c.font = Font(bold=True)
+        c.alignment = Alignment(horizontal="center")
 
-    section_totals = {}
-    total_sum = 0
-    for e in processed_entries:
-        ws_name = e["WorkSection"].upper()
-        amt = e["Amount"]
-        section_totals[ws_name] = section_totals.get(ws_name, 0) + amt
-        total_sum += amt
+    totals = populated_df.groupby("Section")["Amount"].sum()
+    r = 2
+    grand_total = 0.0
+    for sec, val in totals.items():
+        ws_sum.cell(row=r, column=1, value=sec)
+        ws_sum.cell(row=r, column=2, value=round(val, 2)).style = currency_fmt
+        grand_total += val
+        r += 1
 
-    row = 2
-    for ws_name in WORKSECTIONS_ORDER:
-        total = section_totals.get(ws_name.upper(), 0)
-        if total > 0:
-            summary.cell(row=row, column=1, value=ws_name).font = Font(bold=True)
-        amt_cell = summary.cell(row=row, column=2, value=total)
-        amt_cell.style = currency_fmt
-        amt_cell.alignment = Alignment(horizontal="right")
-        row += 1
+    ws_sum.cell(row=r, column=1, value="GRAND TOTAL").font = Font(bold=True, size=12)
+    ws_sum.cell(row=r, column=2, value=round(grand_total, 2)).style = currency_fmt
 
-    summary.cell(row=row, column=1, value="GRAND TOTAL").font = Font(bold=True, size=12)
-    total_cell = summary.cell(row=row, column=2, value=total_sum)
-    total_cell.style = currency_fmt
-    total_cell.font = Font(bold=True, size=12)
-    total_cell.alignment = Alignment(horizontal="right")
+    # Adjust column widths
+    for col in range(1, 7):
+        ws.column_dimensions[get_column_letter(col)].width = 20
 
     wb.save(output_path)
-    print(f"✅ Styled Excel exported: {output_path}")
+    print(f"✅ BESMM4 BoQ exported: {output_path}")
 
+
+# ---------------------------------------------
+# MAIN GENERATION ENTRYPOINT
+# ---------------------------------------------
+def generate_besmm4_boq(parsed_entries, template_path, output_path, location="Kaduna"):
+    tpl = _load_template(template_path)
+    populated = populate_template_with_quantities(tpl, parsed_entries, location=location)
+    export_besmm4_excel(populated, output_path)
+
+
+# ---------------------------------------------
+# TEST (optional)
+# ---------------------------------------------
+if __name__ == "__main__":
+    sample_entries = [
+        {"Room": "Living Room", "Element": "Blockwork", "Description": "Wall blockwork 225mm thick", "Unit": "m2", "Quantity": 120},
+        {"Room": "Living Room", "Element": "Plastering", "Description": "Internal plaster 12mm thick", "Unit": "m2", "Quantity": 240},
+        {"Room": "Kitchen", "Element": "Tiling", "Description": "Floor tiling", "Unit": "m2", "Quantity": 12},
+    ]
+
+    tpl_path = os.path.join(os.getcwd(), "qs_ai_project", "besmm4_template.csv")
+    out_path = os.path.join(os.getcwd(), "qs_ai_project", "besmm4_boq.xlsx")
+
+    generate_besmm4_boq(sample_entries, tpl_path, out_path, location="Kaduna")
 
 
