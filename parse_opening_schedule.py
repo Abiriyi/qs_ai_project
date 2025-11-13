@@ -3,54 +3,55 @@ import re
 from collections import defaultdict
 import pdfplumber
 
+
 def _to_m(val_str):
-    """Convert a numeric string (mm) to meters as float. Handles commas."""
-    v = int(val_str.replace(",", "").strip())
-    return v / 1000.0
+    """Convert a numeric string (mm) to meters as float. Handles commas, decimals, etc."""
+    val_str = val_str.strip().replace(",", "")
+    try:
+        v = float(val_str)
+        # Assume mm if > 20 (since windows rarely 20 m wide)
+        return v / 1000.0 if v > 20 else v
+    except Exception:
+        return None
+
 
 def parse_opening_schedule(pdf_path, verbose=False):
     """
-    Parse a doors & windows schedule PDF and return openings library + BoQ entries.
-    Returns:
+    Parse a doors & windows schedule PDF and return:
       openings_lib (dict)
       boq_entries (list of dicts)
+    Each BoQ entry follows the structure required by the BESMM4 pipeline.
     """
     openings = defaultdict(lambda: {"type": None, "count": 0, "width_m": None, "height_m": None, "raw": []})
 
-    with pdfplumber.open(pdf_path) as pdf:
-        full_text = "\n".join([page.extract_text() or "" for page in pdf.pages])
+    try:
+        with pdfplumber.open(pdf_path) as pdf:
+            full_text = "\n".join([page.extract_text() or "" for page in pdf.pages])
+    except Exception as e:
+        print(f"⚠️ Could not open {pdf_path}: {e}")
+        return {}, []
 
+    # Common patterns
     tag_pattern = re.compile(r"\b([WD]\d{1,3})\b", re.IGNORECASE)
-    size_x_pattern = re.compile(r"(\d{3,5})\s*[xX]\s*(\d{3,5})")
-    two_numbers_pattern = re.compile(r"\b([WD]\d{1,3})\b\s*(\d{3,5})\s+(\d{3,5})")
-    count_pattern = re.compile(r"\b([WD]\d{1,3})\b\s*(\d{1,4})\s*(?:no|nos|no\.|nos\.)", re.IGNORECASE)
+    size_x_pattern = re.compile(r"(\d{3,5})\s*[xX×]\s*(\d{3,5})")
+    count_pattern = re.compile(r"\b([WD]\d{1,3})\b\s*(\d{1,3})\s*(?:no|nos|no\.|nos\.)", re.IGNORECASE)
     simple_tag_count = re.compile(r"\b([WD]\d{1,3})\b\s*0?([1-9]\d?)\b")
 
-    # Size patterns
+    # Match size formats like "W01 1200x1500" or "D02 900 X 2100"
     for m in size_x_pattern.finditer(full_text):
-        start = max(0, m.start() - 40)
+        w_mm, h_mm = m.group(1), m.group(2)
+        start = max(0, m.start() - 50)
         context = full_text[start:m.start()]
         tag_match = tag_pattern.search(context)
         if tag_match:
             tag = tag_match.group(1).upper()
-            w_mm, h_mm = m.group(1), m.group(2)
             openings[tag]["width_m"] = _to_m(w_mm)
             openings[tag]["height_m"] = _to_m(h_mm)
-            openings[tag]["raw"].append(("size_x", m.group(0)))
+            openings[tag]["raw"].append(("size", f"{w_mm}x{h_mm}"))
             if verbose:
-                print(f"Found size {m.group(0)} for tag {tag}")
+                print(f"✅ Found size for {tag}: {w_mm}x{h_mm}")
 
-    # Two-number patterns
-    for m in two_numbers_pattern.finditer(full_text):
-        tag = m.group(1).upper()
-        w_mm, h_mm = m.group(2), m.group(3)
-        if openings[tag]["width_m"] is None:
-            openings[tag]["width_m"] = _to_m(w_mm)
-        if openings[tag]["height_m"] is None:
-            openings[tag]["height_m"] = _to_m(h_mm)
-        openings[tag]["raw"].append(("two_numbers", f"{w_mm} {h_mm}"))
-
-    # Count patterns
+    # Counts
     for m in count_pattern.finditer(full_text):
         tag = m.group(1).upper()
         openings[tag]["count"] = max(openings[tag]["count"], int(m.group(2)))
@@ -66,10 +67,12 @@ def parse_opening_schedule(pdf_path, verbose=False):
         if openings[tag]["count"] == 0:
             openings[tag]["count"] = 1
 
-    # Normalize + build BoQ entries
+    # Normalize + create BoQ entries
     openings_lib, boq_entries = {}, []
     for tag, info in openings.items():
         typ = "window" if tag.startswith("W") else "door" if tag.startswith("D") else "other"
+        element = "Windows" if typ == "window" else "Doors"
+
         openings_lib[tag] = {
             "type": typ,
             "count": info["count"],
@@ -78,14 +81,20 @@ def parse_opening_schedule(pdf_path, verbose=False):
             "raw": info["raw"],
         }
 
+        desc = f"{tag}: {typ.title()} {info['width_m'] or '?'}m × {info['height_m'] or '?'}m ({info['count']} No.)"
+
         boq_entries.append({
             "Room": "ALL",
-            "Element": "Windows" if typ == "window" else "Doors",
-            "Description": f"{tag} ({info['count']} no.)",
+            "Element": element,
+            "Description": desc,
             "Unit": "No.",
             "Quantity": info["count"],
             "WorkSection": "Superstructure Works"
         })
 
+    if verbose:
+        print(f"✅ Extracted {len(boq_entries)} openings from {pdf_path}")
+
     return openings_lib, boq_entries
+
 

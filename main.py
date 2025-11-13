@@ -6,7 +6,8 @@ from pdf_parser import extract_pdf_text
 from parse_floorplan import build_boq_entries
 from parse_section import parse_section as parse_section_pdf
 from parse_opening_schedule import parse_opening_schedule
-from boq_generator import generate_besmm4_boq, WORKSECTIONS_ORDER
+from boq_generator import generate_besmm4_boq
+
 #from boq_generator import pluralize_worksection
 
 load_dotenv()
@@ -110,13 +111,15 @@ if __name__ == "__main__":
     else:
         print(f"✅ Found {len(cleaned_entries)} BoQ entries from all drawings.")
         # generate BESMM4 BoQ using the full template (adjust path if needed)
-        template_path = os.path.join(os.getcwd(), "qs_ai_project", "besmm4_template_full.csv")
-        output_path = os.path.join(os.getcwd(), "qs_ai_project", "besmm4_full_boq.xlsx")
+        #template_path = os.path.join(os.getcwd(), "qs_ai_project", "besmm4_template_full.csv")
+        output_path = os.path.join(os.getcwd(), "besmm4_full_boq.xlsx")
         try:
-            generate_besmm4_boq(cleaned_entries, template_path, output_path, location=location)
+            from boq_generator import generate_besmm4_boq
+            generate_besmm4_boq(cleaned_entries, output_path, location=location)
             print(f"✅ BoQ exported to: {output_path}")
         except Exception as e:
             print(f"❌ generate_besmm4_boq failed: {e}")
+
 
 
 
