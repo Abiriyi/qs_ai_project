@@ -1,35 +1,45 @@
-# boq_generator.py
+
+# boq_generator_upgraded.py
 """
-BESMM4 hierarchical BoQ generator with geometry-based quantity computation
-and template-preserving Excel population.
+Upgraded BoQ generator (full) — fixes canonical mapping and quantity population.
 
-Usage:
-    from boq_generator import generate_besmm4_boq
-    generate_besmm4_boq(parsed_entries_list, "output.xlsx", location="Kaduna")
-
+Features:
+- Stronger mapping from parsed Element/Description -> BESMM4 canonical items
+- Diagnostic mode to print mapping decisions
+- Preserves geometry fields so geometry_rules can compute quantities
+- Uses provided Excel template and writes quantities, rates, amounts
+- Audit sheet with justifications
 Requires:
-    - pandas
-    - openpyxl
-    - ai_pricing.get_rate_from_library(element, description, unit, location)
-    - geometry_rules.py (in same directory)
+    pandas, openpyxl, ai_pricing, geometry_rules.py
 """
 
 import os
 from collections import defaultdict, OrderedDict
 import pandas as pd
 from openpyxl import load_workbook
-from openpyxl.styles import NamedStyle
 from openpyxl.utils import get_column_letter
 from ai_pricing import get_rate_from_library
-
 from geometry_rules import RULE_REGISTRY
 
 # ---------- Config ----------
 DEFAULT_RATE = 0.0
-TEMPLATE_PATH = "/mnt/data/besmm4_full_boq.xlsx"  # authoritative template (local path)
+TEMPLATE_PATH = os.path.expanduser("~/qs_ai_project/templates/besmm4_full_boq.xlsx")
 DEFAULTS = {
     "room_height": 3.0,
     "slab_depth": 0.15,
+}
+DIAGNOSTIC = False  # set True to print mapping diagnostics
+
+# User-provided mapping from parser element -> BESMM4 canonical (human-friendly)
+ELEMENT_TO_BESMM4 = {
+    "floor finish": "Tiling",           # maps Floor Finish -> Tiling (BESMM4 canonical)
+    "wall finish": "Plastering",        # map wall finish -> Plastering (or Painting handled separately)
+    "skirting": "Skirting",
+    "ceiling finish": "Ceiling Finish",
+    "windows": "Windows",
+    "doors": "Doors",
+    "excavation": "Excavation",
+    # add more as needed
 }
 
 # Official high-level BESMM4 sections (1.0..8.0)
@@ -44,7 +54,7 @@ BESMM4_SECTIONS = OrderedDict([
     ("8.0", "Provisional & Prime Cost Sums"),
 ])
 
-# (same hierarchy and ELEMENT_KEYWORDS as before)
+# Hierarchy (kept minimal / same as original)
 BESMM4_HIERARCHY = {
     "2.0": [
         ("2.1", "Excavating & Filling", [
@@ -118,6 +128,29 @@ BESMM4_HIERARCHY = {
     ],
 }
 
+# Build flat hierarchy map
+def _flatten_hierarchy():
+    flat = {}
+    for sec_code, groups in BESMM4_HIERARCHY.items():
+        sec_name = BESMM4_SECTIONS.get(sec_code, sec_code)
+        for g_code, g_name, items in groups:
+            for item_code, item_desc, unit, canonical in items:
+                flat_key = (canonical or item_desc).lower()
+                flat[flat_key] = {
+                    "section_code": sec_code,
+                    "section_name": sec_name,
+                    "group_code": g_code,
+                    "group_name": g_name,
+                    "item_code": item_code,
+                    "item_desc": item_desc,
+                    "unit": unit,
+                    "canonical": canonical or item_desc
+                }
+    return flat
+
+FLAT_HIERARCHY = _flatten_hierarchy()
+
+# Lightweight keyword mapping
 ELEMENT_KEYWORDS = {
     "excavation": "Excavation",
     "earthwork": "Earthworks",
@@ -125,12 +158,18 @@ ELEMENT_KEYWORDS = {
     "ground floor slab": "Ground Floor Slab",
     "slab": "Ground Floor Slab",
     "blockwork": "Blockwork",
+    "block": "Blockwork",
+    "masonry": "Blockwork",
     "partition": "Partition Walls",
     "plaster": "Plastering",
+    "plastering": "Plastering",
     "tiling": "Tiling",
+    "tile": "Tiling",
     "painting": "Painting",
+    "paint": "Painting",
     "ceiling": "Ceiling Finish",
     "skirting": "Skirting",
+    "skirt": "Skirting",
     "door": "Doors",
     "window": "Windows",
     "sanitary": "Sanitary Fittings",
@@ -150,61 +189,65 @@ ELEMENT_KEYWORDS = {
     "reinforced concrete": "Reinforced Concrete",
     "concrete": "Concrete",
     "steel": "Steelwork",
-    "skirting": "Skirting",
 }
 
-# ---------------- Helper Utilities ----------------
+# ---------------- Utilities ----------------
+
+def _normalize_text(s):
+    if s is None:
+        return ""
+    return str(s).strip().lower()
 
 def _canonical_element_from_text(text: str):
-    """Try to find a canonical element name from arbitrary text."""
+    """Try to find a canonical element name from arbitrary text using expanded keywords."""
     if text is None:
         return None
-    t = text.lower()
+    t = _normalize_text(text)
+    # direct keyword match
     for k, canonical in ELEMENT_KEYWORDS.items():
         if k in t:
             return canonical
     return None
 
-def _flatten_hierarchy():
-    """Return mapping canonical_element -> (section_code, group_code, item_code, unit, description)"""
-    flat = {}
-    for sec_code, groups in BESMM4_HIERARCHY.items():
-        sec_name = BESMM4_SECTIONS.get(sec_code, None) or ""
-        for g_code, g_name, items in groups:
-            for item_code, item_desc, unit, canonical in items:
-                flat_key = (canonical or item_desc).lower()
-                flat[flat_key] = {
-                    "section_code": sec_code,
-                    "section_name": BESMM4_SECTIONS.get(sec_code, sec_code),
-                    "group_code": g_code,
-                    "group_name": g_name,
-                    "item_code": item_code,
-                    "item_desc": item_desc,
-                    "unit": unit,
-                    "canonical": canonical or item_desc
-                }
-    return flat
-
-FLAT_HIERARCHY = _flatten_hierarchy()
-
 # ---------------- Aggregation & Mapping ----------------
 
 def aggregate_parsed_entries(parsed_entries):
     """
-    Aggregate parsed entries but preserve geometry and raw entries so rule handlers can compute quantities.
-    Returns: dict keyed by canonical.lower() -> { 'units': defaultdict(float), 'descriptions': set(), 'entries': [raw entries...] }
+    Aggregate parsed entries but preserve geometry and raw entries for rule handlers.
+    Also performs a mapping from parsed Element -> BESMM4 canonical via ELEMENT_TO_BESMM4 and ELEMENT_KEYWORDS.
+    Returns: dict keyed by canonical.lower() -> payload
     """
     agg = {}
     for e in parsed_entries:
-        element = (e.get("Element") or "").strip()
-        description = (e.get("Description") or "").strip()
-        unit = (e.get("Unit") or "").strip() or "item"
+        element_raw = e.get("Element") or ""
+        description_raw = e.get("Description") or ""
+        element_norm = _normalize_text(element_raw)
+        description_norm = _normalize_text(description_raw)
+        unit = (e.get("Unit") or "item") or "item"
 
-        # preserve geometry/fields for rules
+        # try user mapping first
+        mapped = None
+        if element_norm in ELEMENT_TO_BESMM4:
+            mapped = ELEMENT_TO_BESMM4[element_norm]
+        else:
+            # try keyword-based canonical from element or description
+            mapped = _canonical_element_from_text(element_raw) or _canonical_element_from_text(description_raw)
+
+        # if still none, fallback to element text (first word) or description
+        if not mapped:
+            if element_raw:
+                mapped = element_raw
+            else:
+                mapped = description_raw
+
+        canonical = mapped or ""
+        key = canonical.lower()
+
+        # preserved data for geometry
         preserved = {
             "Room": e.get("Room"),
-            "Element": element,
-            "Description": description,
+            "Element": element_raw,
+            "Description": description_raw,
             "Unit": unit,
             "Quantity": e.get("Quantity", e.get("Qty", None)),
             "length": e.get("length") or e.get("Length"),
@@ -213,46 +256,49 @@ def aggregate_parsed_entries(parsed_entries):
             "area": e.get("area") or e.get("Area"),
             "thickness": e.get("thickness") or e.get("depth"),
             "openings": e.get("openings") or e.get("Openings") or e.get("openings_area"),
-            # keep raw entry for fallback
             "raw": e
         }
 
-        canonical = _canonical_element_from_text(element) or _canonical_element_from_text(description) or element or description
-        if not canonical:
-            continue
-        key = canonical.lower()
         if key not in agg:
             agg[key] = {"units": defaultdict(float), "descriptions": set(), "entries": []}
-        # keep numeric aggregation for fallback
+        # numeric aggregation for fallback
         try:
             q = e.get("Quantity", e.get("Qty", 0)) or 0
             qn = float(str(q).replace(",", "")) if q is not None else 0.0
         except Exception:
             qn = 0.0
         agg[key]["units"][unit] += qn
-        if description:
-            agg[key]["descriptions"].add(description)
+        if description_raw:
+            agg[key]["descriptions"].add(description_raw)
         agg[key]["entries"].append(preserved)
+
+        if DIAGNOSTIC:
+            print("AGGREGATE:", element_raw, "|", description_raw, "=> canonical:", canonical)
+
     return agg
 
 # ---------------- Geometry-based computation ----------------
 
 def compute_quantities_from_geometry(agg, defaults=None):
     """
-    Given aggregated dict (from aggregate_parsed_entries), compute quantities per canonical key
-    using handlers in geometry_rules.RULE_REGISTRY. Returns dict canonical.lower() -> {quantity, unit, justification}
+    Compute quantities using handlers based on canonical keys present in agg.
+    Returns dict canonical.lower() -> {quantity, unit, justification}
     """
     if defaults is None:
         defaults = DEFAULTS
     computed = {}
     for canonical_key, payload in agg.items():
-        handler = RULE_REGISTRY.get(canonical_key)
+        # handler lookup: try direct FLAT_HIERARCHY canonical match or lowercased keys in RULE_REGISTRY
+        handler_key = canonical_key  # handlers expect keys like 'plastering', 'tiling', etc.
+        handler = RULE_REGISTRY.get(handler_key) or RULE_REGISTRY.get(canonical_key.lower()) or RULE_REGISTRY.get(_normalize_text(canonical_key))
+        if handler is None:
+            # try elemental keyword mapping
+            handler = RULE_REGISTRY.get(_canonical_element_from_text(canonical_key))
         if handler is None:
             # fallback: use aggregated numeric sum across units
             units = payload.get("units", {})
             qty = 0.0
             if units:
-                # choose largest numeric sum (best-effort)
                 try:
                     qty = max(units.values())
                 except Exception:
@@ -262,18 +308,20 @@ def compute_quantities_from_geometry(agg, defaults=None):
                 "unit": next(iter(units.keys())) if units else None,
                 "justification": "Fallback to parsed numeric quantities"
             }
+            if DIAGNOSTIC:
+                print("NO HANDLER for:", canonical_key, "-> fallback qty:", qty)
         else:
             try:
                 res = handler(payload.get("entries", []), defaults)
-                # normalize
                 q = float(res.get("quantity") or 0.0)
                 computed[canonical_key] = {
                     "quantity": round(q, 4),
                     "unit": res.get("unit"),
                     "justification": res.get("justification", "")
                 }
+                if DIAGNOSTIC:
+                    print("HANDLED:", canonical_key, "=>", computed[canonical_key])
             except Exception as ex:
-                # handler failed: fallback
                 units = payload.get("units", {})
                 qty = sum(units.values()) if units else 0.0
                 computed[canonical_key] = {
@@ -281,15 +329,13 @@ def compute_quantities_from_geometry(agg, defaults=None):
                     "unit": next(iter(units.keys())) if units else None,
                     "justification": f"Handler error; fallback to parsed qty ({ex})"
                 }
+                if DIAGNOSTIC:
+                    print("HANDLER ERROR for:", canonical_key, ex)
     return computed
 
-# ---------------- Template population (load template & write into it) ----------------
+# ---------------- Template population ----------------
 
 def _build_full_item_list(include_empty=True):
-    """
-    Build a list of all items expected by the BESMM4_HIERARCHY.
-    Returns list of dicts with item metadata.
-    """
     items = []
     for sec_code, groups in BESMM4_HIERARCHY.items():
         sec_name = BESMM4_SECTIONS.get(sec_code, sec_code)
@@ -313,43 +359,63 @@ def _build_full_item_list(include_empty=True):
 
 def populate_besmm4_from_parsed(parsed_entries, location="Kaduna", include_empty=True):
     """
-    Map parsed entries into the full BESMM4 item list, compute quantities using geometry rules,
-    and lookup rates. Returns: pandas.DataFrame of populated items.
+    Map parsed entries into BESMM4 master items using computed geometry quantities.
     """
+    if DIAGNOSTIC:
+        print("Starting populate_besmm4_from_parsed with", len(parsed_entries), "entries")
+
     agg = aggregate_parsed_entries(parsed_entries)
     computed = compute_quantities_from_geometry(agg, defaults=DEFAULTS)
     items = _build_full_item_list(include_empty=include_empty)
 
-    # Map computed quantities into items
+    # Create reverse map: canonical.lower() -> item record(s)
+    canonical_to_items = defaultdict(list)
     for it in items:
-        key = (it["Canonical"] or it["Description"]).lower()
-        qty = 0.0
-        justification = ""
-        unit = it["Unit"]
+        canonical_to_items[(it["Canonical"] or it["Description"]).lower()].append(it)
 
-        if key in computed:
-            qty = computed[key].get("quantity", 0.0)
-            # try to prefer template unit; if handler returned a different unit, keep item unit for display
-            justification = computed[key].get("justification", "")
+    # Map computed quantities into template items
+    for canonical_key, res in computed.items():
+        qty = res.get("quantity", 0.0)
+        just = res.get("justification", "")
+        # Try direct match in canonical_to_items
+        if canonical_key in canonical_to_items:
+            for it in canonical_to_items[canonical_key]:
+                it["Quantity"] = float(round(qty, 4))
+                it["Justification"] = just
         else:
-            # If not computed, try fuzzy match in agg (as before)
-            # and fallback to parsed numeric totals
-            found = False
-            for agg_key, v in agg.items():
-                if agg_key in key or key in agg_key:
-                    qty = sum(v["units"].values())
-                    found = True
+            # fuzzy match: try substring or keyword match against keys
+            matched = False
+            for can_k, its in canonical_to_items.items():
+                if canonical_key in can_k or can_k in canonical_key:
+                    for it in its:
+                        it["Quantity"] = float(round(qty, 4))
+                        it["Justification"] = just
+                    matched = True
+                    if DIAGNOSTIC:
+                        print("Fuzzy matched", canonical_key, "->", can_k)
                     break
-            if not found:
-                qty = 0.0
-            justification = "No geometry handler; used parsed quantities" if qty > 0 else "No data"
+            if not matched and DIAGNOSTIC:
+                print("No template item matched for computed key:", canonical_key)
 
-        it["Quantity"] = float(round(qty, 4))
-        it["Justification"] = justification
+    # As a final fallback, if some items remain zero but agg contains numeric totals, try to map them
+    for key, payload in agg.items():
+        total_qty = sum(payload.get("units", {}).values())
+        if total_qty <= 0:
+            continue
+        # try to find template items whose canonical contains key
+        for can_k, its in canonical_to_items.items():
+            if key in can_k or can_k in key:
+                for it in its:
+                    if it["Quantity"] == 0:
+                        it["Quantity"] = float(round(total_qty, 4))
+                        it["Justification"] = "Fallback mapped from parsed totals"
+                        if DIAGNOSTIC:
+                            print("Fallback mapped", key, "->", can_k, total_qty)
 
-        # Rate lookup
+    # Rate lookup and amount calc
+    for it in items:
         try:
-            rate = get_rate_from_library(it["Canonical"], it["Description"], unit, location=location)
+            rate = get_rate_from_library(it["Canonical"], it["Description"], it["Unit"], location=location)
         except Exception:
             rate = None
         if rate is None:
@@ -361,22 +427,16 @@ def populate_besmm4_from_parsed(parsed_entries, location="Kaduna", include_empty
     return df
 
 def export_besmm4_using_template(populated_df: pd.DataFrame, output_path: str, template_path: str = None):
-    """
-    Load the template workbook (template_path), find Item Code rows and Quantity/Rate/Amount columns,
-    write numeric values back into the template while preserving original formatting.
-    Also create a hidden _audit sheet containing per-item justification.
-    """
     if template_path is None:
         template_path = TEMPLATE_PATH
 
     if not os.path.exists(template_path):
-        raise FileNotFoundError(f"Template not found at {template_path}")
+        raise FileNotFoundError(f"BESMM4 template not found at {template_path}")
 
     wb = load_workbook(template_path)
-    # assume BoQ is in the active sheet by default; if template has named sheet, tweak as needed
     ws = wb.active
 
-    # find header row that contains 'Item Code' and 'Quantity'
+    # find header row and columns
     header_row = None
     item_code_col = None
     qty_col = None
@@ -385,11 +445,10 @@ def export_besmm4_using_template(populated_df: pd.DataFrame, output_path: str, t
 
     search_limit = min(60, ws.max_row)
     for r in range(1, search_limit + 1):
-        values = [ (ws.cell(row=r, col=c).value if ws.cell(row=r, col=c).value is not None else "") for c in range(1, ws.max_column+1) ]
+        values = [ (ws.cell(row=r, column=c).value if ws.cell(row=r, column=c).value is not None else "") for c in range(1, ws.max_column+1) ]
         joined = "|".join([str(v).strip().lower() for v in values if v is not None])
         if "item code" in joined or "itemcode" in joined:
             header_row = r
-            # find exact columns by searching the row
             for c, val in enumerate(values, start=1):
                 if not val:
                     continue
@@ -405,15 +464,13 @@ def export_besmm4_using_template(populated_df: pd.DataFrame, output_path: str, t
             break
 
     if header_row is None or item_code_col is None or qty_col is None:
-        # fallback strategy: assume template uses default layout similar to previous exporter:
-        # Item Code col = 1, Description = 2, Unit = 3, Quantity = 4, Rate = 5, Amount = 6
         item_code_col = item_code_col or 1
         qty_col = qty_col or 4
         rate_col = rate_col or 5
         amount_col = amount_col or 6
         header_row = header_row or 1
 
-    # Build an index mapping item_code -> row index in sheet for faster writes
+    # build index item_code -> row
     item_to_row = {}
     for r in range(header_row + 1, ws.max_row + 1):
         cell = ws.cell(row=r, column=item_code_col)
@@ -422,28 +479,22 @@ def export_besmm4_using_template(populated_df: pd.DataFrame, output_path: str, t
         code = str(cell.value).strip()
         if code == "":
             continue
-        # store the first occurrence; if multiple, you'll need to refine logic
         if code not in item_to_row:
             item_to_row[code] = r
 
-    # Write values into template
-    # Preserve existing number formats when possible
+    # write values
     for _, row in populated_df.iterrows():
         item_code = str(row["ItemCode"]).strip()
         if item_code in item_to_row:
             r = item_to_row[item_code]
-            # Quantity
             qcell = ws.cell(row=r, column=qty_col)
             qcell.value = float(row["Quantity"] or 0.0)
-            # do not change style; but ensure numeric format exists
             try:
-                # if cell had number_format, preserve; else set a generic number format
                 if not qcell.number_format or qcell.number_format == 'General':
                     qcell.number_format = "#,##0.##"
             except Exception:
                 pass
 
-            # Rate
             rcell = ws.cell(row=r, column=rate_col)
             rcell.value = float(row["Rate"] or 0.0)
             try:
@@ -452,7 +503,6 @@ def export_besmm4_using_template(populated_df: pd.DataFrame, output_path: str, t
             except Exception:
                 pass
 
-            # Amount
             acell = ws.cell(row=r, column=amount_col)
             acell.value = float(row["Amount"] or 0.0)
             try:
@@ -461,15 +511,14 @@ def export_besmm4_using_template(populated_df: pd.DataFrame, output_path: str, t
             except Exception:
                 pass
         else:
-            # Item code not found in template; skip or log (here we append below)
-            continue
+            # not found in template; skip
+            if DIAGNOSTIC:
+                print("Template missing item code:", item_code)
 
-    # Create / populate audit sheet
+    # audit sheet
     audit_name = "_audit"
     if audit_name in wb.sheetnames:
-        audit = wb[audit_name]
-        # clear existing rows (leave header) - simple approach: create new sheet instead
-        wb.remove(audit)
+        wb.remove(wb[audit_name])
     audit = wb.create_sheet(audit_name)
     audit.append(["ItemCode", "Description", "Unit", "Quantity", "Rate", "Amount", "Justification"])
     for _, row in populated_df.iterrows():
@@ -484,20 +533,17 @@ def export_besmm4_using_template(populated_df: pd.DataFrame, output_path: str, t
         ])
     audit.sheet_state = "hidden"
 
-    # Save workbook copy
     wb.save(output_path)
     return output_path
 
-# ---------------- Public entrypoint ----------------
+# public
+def generate_besmm4_boq(parsed_entries: list, output_path: str, location: str = "Kaduna", template_path: str = None, diagnostic: bool = False):
+    """
+    Entry point.
+    """
+    global DIAGNOSTIC
+    DIAGNOSTIC = bool(diagnostic)
 
-def generate_besmm4_boq(parsed_entries: list[dict], output_path: str, location: str = "Kaduna", template_path: str = None):
-    """
-    High-level function:
-      - parsed_entries: list of dicts with keys Room, Element, Description, Unit, Quantity and optional geometry fields
-      - output_path: path to .xlsx to write
-      - location: passed to rate lookup
-      - template_path: optional path to Excel template (defaults to TEMPLATE_PATH)
-    """
     if not isinstance(parsed_entries, list):
         raise ValueError("parsed_entries must be a list of dicts")
 
@@ -505,12 +551,13 @@ def generate_besmm4_boq(parsed_entries: list[dict], output_path: str, location: 
         template_path = TEMPLATE_PATH
 
     populated = populate_besmm4_from_parsed(parsed_entries, location=location, include_empty=True)
-    # write into template preserving formatting
     out = export_besmm4_using_template(populated, output_path, template_path=template_path)
-    print(f"✅ Full BESMM4 BoQ generated: {out}")
+    if DIAGNOSTIC:
+        print("Generated:", out)
     return out
 
-# ----------------- End of module -----------------
+if __name__ == "__main__":
+    print("This module provides generate_besmm4_boq(parsed_entries, output_path, ...)")
 
 
 

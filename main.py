@@ -99,7 +99,15 @@ if __name__ == "__main__":
             "Element": e.get("Element") or "Misc",
             "Description": e.get("Description") or e.get("Element") or "Item",
             "Unit": e.get("Unit") or "item",
-            "Quantity": qty
+            "Quantity": qty,
+
+            # >>> PRESERVE GEOMETRY <<<
+            "length": e.get("length") or e.get("Length"),
+            "width": e.get("width") or e.get("Width"),
+            "height": e.get("height") or e.get("Height"),
+            "area": e.get("area") or e.get("Area"),
+            "thickness": e.get("thickness") or e.get("depth"),
+            "openings": e.get("openings") or e.get("Openings") or e.get("openings_area"),
         })
 
     if not cleaned_entries:
@@ -114,7 +122,12 @@ if __name__ == "__main__":
         output_path = os.path.join(os.getcwd(), "besmm4_generated.xlsx")
 
         try:
-            generate_besmm4_boq(cleaned_entries, output_path, location=location)
+            generate_besmm4_boq(
+                cleaned_entries,
+                output_path,
+                location=location
+            )
+
             print(f"✅ Generated BoQ saved as: {output_path}")
         except Exception as e:
             print(f"❌ generate_besmm4_boq failed: {e}")
