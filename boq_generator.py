@@ -1,4 +1,3 @@
-
 # boq_generator_upgraded.py
 """
 Upgraded BoQ generator (full) — fixes canonical mapping and quantity population.
@@ -20,6 +19,7 @@ from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
 from ai_pricing import get_rate_from_library
 from geometry_rules import RULE_REGISTRY
+from measurement_context import MeasurementContext
 
 # ---------- Config ----------
 DEFAULT_RATE = 0.0
@@ -279,58 +279,60 @@ def aggregate_parsed_entries(parsed_entries):
 
 # ---------------- Geometry-based computation ----------------
 
-def compute_quantities_from_geometry(agg, defaults=None):
-    """
-    Compute quantities using handlers based on canonical keys present in agg.
-    Returns dict canonical.lower() -> {quantity, unit, justification}
-    """
+def compute_quantities_from_geometry(agg, context, defaults=None):
     if defaults is None:
         defaults = DEFAULTS
+
     computed = {}
+
+    CONTEXT_AWARE_RULES = {
+        "plastering",
+        "painting",
+        "blockwork",
+        "partition walls",
+        "skirting",
+        "reinforced concrete",
+        "concrete",
+        "doors",
+        "windows",
+    }
+
     for canonical_key, payload in agg.items():
-        # handler lookup: try direct FLAT_HIERARCHY canonical match or lowercased keys in RULE_REGISTRY
-        handler_key = canonical_key  # handlers expect keys like 'plastering', 'tiling', etc.
-        handler = RULE_REGISTRY.get(handler_key) or RULE_REGISTRY.get(canonical_key.lower()) or RULE_REGISTRY.get(_normalize_text(canonical_key))
+        key = canonical_key.lower()
+        handler = RULE_REGISTRY.get(key)
+
         if handler is None:
-            # try elemental keyword mapping
-            handler = RULE_REGISTRY.get(_canonical_element_from_text(canonical_key))
-        if handler is None:
-            # fallback: use aggregated numeric sum across units
+            # fallback to numeric quantities
             units = payload.get("units", {})
-            qty = 0.0
-            if units:
-                try:
-                    qty = max(units.values())
-                except Exception:
-                    qty = sum(units.values())
-            computed[canonical_key] = {
-                "quantity": round(float(qty), 4),
-                "unit": next(iter(units.keys())) if units else None,
+            qty = sum(units.values()) if units else 0.0
+            computed[key] = {
+                "quantity": round(qty, 4),
+                "unit": next(iter(units.keys()), None),
                 "justification": "Fallback to parsed numeric quantities"
             }
-            if DIAGNOSTIC:
-                print("NO HANDLER for:", canonical_key, "-> fallback qty:", qty)
-        else:
-            try:
-                res = handler(payload.get("entries", []), defaults)
-                q = float(res.get("quantity") or 0.0)
-                computed[canonical_key] = {
-                    "quantity": round(q, 4),
-                    "unit": res.get("unit"),
-                    "justification": res.get("justification", "")
-                }
-                if DIAGNOSTIC:
-                    print("HANDLED:", canonical_key, "=>", computed[canonical_key])
-            except Exception as ex:
-                units = payload.get("units", {})
-                qty = sum(units.values()) if units else 0.0
-                computed[canonical_key] = {
-                    "quantity": round(float(qty), 4),
-                    "unit": next(iter(units.keys())) if units else None,
-                    "justification": f"Handler error; fallback to parsed qty ({ex})"
-                }
-                if DIAGNOSTIC:
-                    print("HANDLER ERROR for:", canonical_key, ex)
+            continue
+
+        try:
+            if key in CONTEXT_AWARE_RULES:
+                res = handler(payload["entries"], context)
+            else:
+                res = handler(payload["entries"], defaults)
+
+            computed[key] = {
+                "quantity": float(res.get("quantity", 0.0)),
+                "unit": res.get("unit"),
+                "justification": res.get("justification", "")
+            }
+
+        except Exception as ex:
+            units = payload.get("units", {})
+            qty = sum(units.values()) if units else 0.0
+            computed[key] = {
+                "quantity": round(qty, 4),
+                "unit": next(iter(units.keys()), None),
+                "justification": f"Handler failure fallback ({ex})"
+            }
+
     return computed
 
 # ---------------- Template population ----------------
@@ -357,7 +359,7 @@ def _build_full_item_list(include_empty=True):
                 })
     return items
 
-def populate_besmm4_from_parsed(parsed_entries, location="Kaduna", include_empty=True):
+def populate_besmm4_from_parsed(parsed_entries, context, location="Kaduna", include_empty=True):
     """
     Map parsed entries into BESMM4 master items using computed geometry quantities.
     """
@@ -434,41 +436,63 @@ def export_besmm4_using_template(populated_df: pd.DataFrame, output_path: str, t
         raise FileNotFoundError(f"BESMM4 template not found at {template_path}")
 
     wb = load_workbook(template_path)
-    ws = wb.active
 
-    # find header row and columns
+    # --- AUTO-DETECT BoQ SHEET ---
+    ws = None
+    for name in wb.sheetnames:
+        candidate = wb[name]
+        found = False
+
+        search_limit = min(40, candidate.max_row)
+        for r in range(1, search_limit + 1):
+            row_values = [
+                str(candidate.cell(row=r, column=c).value).strip().lower()
+                if candidate.cell(row=r, column=c).value else ""
+                for c in range(1, candidate.max_column + 1)
+            ]
+            joined = " ".join(row_values)
+            if "item code" in joined or "itemcode" in joined:
+                ws = candidate
+                found = True
+                break
+
+        if found:
+            break
+
+    if ws is None:
+        raise RuntimeError("❌ Could not locate BoQ worksheet containing 'Item Code'")
+
+    # --- DETECT HEADER ROW & COLUMNS ---
     header_row = None
     item_code_col = None
     qty_col = None
     rate_col = None
     amount_col = None
 
-    search_limit = min(60, ws.max_row)
+    search_limit = min(40, ws.max_row)
     for r in range(1, search_limit + 1):
-        values = [ (ws.cell(row=r, column=c).value if ws.cell(row=r, column=c).value is not None else "") for c in range(1, ws.max_column+1) ]
-        joined = "|".join([str(v).strip().lower() for v in values if v is not None])
-        if "item code" in joined or "itemcode" in joined:
-            header_row = r
-            for c, val in enumerate(values, start=1):
-                if not val:
-                    continue
-                v = str(val).strip().lower()
-                if v in ("item code", "itemcode", "item_code"):
-                    item_code_col = c
-                if "quantity" in v and qty_col is None:
-                    qty_col = c
-                if "rate" in v and rate_col is None:
-                    rate_col = c
-                if "amount" in v and amount_col is None:
-                    amount_col = c
+        for c in range(1, ws.max_column + 1):
+            val = ws.cell(row=r, column=c).value
+            if not val:
+                continue
+
+            text = str(val).strip().lower()
+
+            if text == "item code" or text == "itemcode":
+                header_row = r
+                item_code_col = c
+            elif "qty" in text or "quantity" in text:
+                qty_col = c
+            elif "rate" in text:
+                rate_col = c
+            elif "amount" in text:
+                amount_col = c
+
+        if header_row and item_code_col and qty_col:
             break
 
     if header_row is None or item_code_col is None or qty_col is None:
-        item_code_col = item_code_col or 1
-        qty_col = qty_col or 4
-        rate_col = rate_col or 5
-        amount_col = amount_col or 6
-        header_row = header_row or 1
+        raise RuntimeError("❌ Failed to detect BoQ header row / columns")
 
     # build index item_code -> row
     item_to_row = {}
@@ -550,7 +574,21 @@ def generate_besmm4_boq(parsed_entries: list, output_path: str, location: str = 
     if template_path is None:
         template_path = TEMPLATE_PATH
 
-    populated = populate_besmm4_from_parsed(parsed_entries, location=location, include_empty=True)
+    context = MeasurementContext(
+    scale=0.01,                       # 1:100
+    storey_height=3.0,                # metres
+    slab_thickness=0.15,
+    confirmed=True,
+    source="ai",
+    scale_confidence=0.7,
+    storey_height_confidence=0.7
+)
+
+    populated = populate_besmm4_from_parsed(
+    parsed_entries,
+    context=context,
+    location=location
+)
     out = export_besmm4_using_template(populated, output_path, template_path=template_path)
     if DIAGNOSTIC:
         print("Generated:", out)

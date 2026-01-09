@@ -125,7 +125,8 @@ if __name__ == "__main__":
             generate_besmm4_boq(
                 cleaned_entries,
                 output_path,
-                location=location
+                location=location,
+                diagnostic=True   # 👈 THIS IS THE ONLY CHANGE
             )
 
             print(f"✅ Generated BoQ saved as: {output_path}")
