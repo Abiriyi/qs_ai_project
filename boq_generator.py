@@ -1,4 +1,4 @@
-# boq_generator_upgraded.py
+# boq_generator.py
 """
 Upgraded BoQ generator (full) — fixes canonical mapping and quantity population.
 
@@ -295,6 +295,9 @@ def compute_quantities_from_geometry(agg, context, defaults=None):
         "concrete",
         "doors",
         "windows",
+        "tiling",
+        "ceiling",
+        "ground floor slab",
     }
 
     for canonical_key, payload in agg.items():
@@ -355,6 +358,7 @@ def _build_full_item_list(include_empty=True):
                     "Quantity": 0.0,
                     "Rate": 0.0,
                     "Amount": 0.0,
+                    "Confidence": 0.0,
                     "Justification": ""
                 })
     return items
@@ -369,7 +373,7 @@ def populate_besmm4_from_parsed(parsed_entries, context, location="Kaduna", incl
     agg = aggregate_parsed_entries(parsed_entries)
     computed = compute_quantities_from_geometry(agg, defaults=DEFAULTS)
     items = _build_full_item_list(include_empty=include_empty)
-
+    
     # Create reverse map: canonical.lower() -> item record(s)
     canonical_to_items = defaultdict(list)
     for it in items:
@@ -379,19 +383,21 @@ def populate_besmm4_from_parsed(parsed_entries, context, location="Kaduna", incl
     for canonical_key, res in computed.items():
         qty = res.get("quantity", 0.0)
         just = res.get("justification", "")
-        # Try direct match in canonical_to_items
+        conf = res.get("confidence", 0.0)
+
         if canonical_key in canonical_to_items:
             for it in canonical_to_items[canonical_key]:
                 it["Quantity"] = float(round(qty, 4))
                 it["Justification"] = just
+                it["Confidence"] = conf
         else:
-            # fuzzy match: try substring or keyword match against keys
             matched = False
             for can_k, its in canonical_to_items.items():
                 if canonical_key in can_k or can_k in canonical_key:
                     for it in its:
                         it["Quantity"] = float(round(qty, 4))
                         it["Justification"] = just
+                        it["Confidence"] = conf
                     matched = True
                     if DIAGNOSTIC:
                         print("Fuzzy matched", canonical_key, "->", can_k)
@@ -413,6 +419,12 @@ def populate_besmm4_from_parsed(parsed_entries, context, location="Kaduna", incl
                         it["Justification"] = "Fallback mapped from parsed totals"
                         if DIAGNOSTIC:
                             print("Fallback mapped", key, "->", can_k, total_qty)
+    # --- Confidence enforcement gate ---
+    for it in items:
+        if it.get("Confidence", 1.0) < 0.6:
+            raise RuntimeError(
+                f"Low confidence quantity for {it['ItemCode']} — review required"
+            )
 
     # Rate lookup and amount calc
     for it in items:
@@ -424,7 +436,7 @@ def populate_besmm4_from_parsed(parsed_entries, context, location="Kaduna", incl
             rate = DEFAULT_RATE
         it["Rate"] = float(rate)
         it["Amount"] = round(it["Quantity"] * it["Rate"], 2)
-
+    
     df = pd.DataFrame(items)
     return df
 
@@ -544,17 +556,19 @@ def export_besmm4_using_template(populated_df: pd.DataFrame, output_path: str, t
     if audit_name in wb.sheetnames:
         wb.remove(wb[audit_name])
     audit = wb.create_sheet(audit_name)
-    audit.append(["ItemCode", "Description", "Unit", "Quantity", "Rate", "Amount", "Justification"])
+    audit.append(["ItemCode", "Description", "Unit", "Quantity", "Rate", "Amount", "Confidence", "Justification"])
     for _, row in populated_df.iterrows():
         audit.append([
-            row["ItemCode"],
-            row["Description"],
-            row["Unit"],
-            float(row["Quantity"] or 0.0),
-            float(row["Rate"] or 0.0),
-            float(row["Amount"] or 0.0),
-            row.get("Justification", "")
-        ])
+        row["ItemCode"],
+        row["Description"],
+        float(row["Quantity"] or 0.0),
+        row["Unit"],
+        float(row["Rate"] or 0.0),
+        float(row["Amount"] or 0.0),
+        float(row.get("Confidence", 0.0)),
+        row.get("Justification", "")
+    ])
+
     audit.sheet_state = "hidden"
 
     wb.save(output_path)

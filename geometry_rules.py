@@ -23,6 +23,16 @@ from measurement_context import MeasurementContext
 # -------------------------------
 # Utilities
 # -------------------------------
+RULE_REQUIREMENTS = {
+    "plastering": ["perimeter", "storey_height"],
+    "painting": ["perimeter", "storey_height"],
+    "tiling": ["area"],
+    "ceiling finish": ["area"],
+    "skirting": ["perimeter"],
+    "doors": ["Quantity"],
+    "windows": ["Quantity"],
+    "reinforced concrete": ["area", "slab_thickness"],
+}
 
 def _safe_float(v, fallback=0.0) -> float:
     try:
@@ -49,81 +59,114 @@ def _context_guard(context: MeasurementContext, requires: List[str]):
 
     return True, ""
 
+def compute_quantity_confidence(entries, context, requires):
+    """
+    Computes confidence score (0–1) for a quantity based on:
+    - Context confirmation
+    - Availability of required geometry
+    - Source reliability
+    """
+
+    score = 1.0
+
+    # Context confirmation is mandatory
+    if not context.confirmed:
+        return 0.0
+
+    # Penalise missing requirements
+    missing = 0
+    for r in requires:
+        if hasattr(context, r):
+            if getattr(context, r) in (None, 0):
+                missing += 1
+        else:
+            if not any(e.get(r) for e in entries):
+                missing += 1
+
+    if requires:
+        score *= max(0.0, 1 - (missing / len(requires)))
+
+    # Source-based confidence modifier
+    source_factor = {
+        "bim": 1.0,
+        "user": 0.9,
+        "ai": 0.75
+    }.get(context.source, 0.7)
+
+    score *= source_factor
+
+    # Clamp to [0,1]
+    return round(min(max(score, 0.0), 1.0), 2)
 
 # -------------------------------
 # WALL-BASED MEASUREMENTS (m2)
 # -------------------------------
 
-# geometry_rules.py
-
 def plastering(entries, context):
-    if not context.confirmed:
-        return {
-            "quantity": 0,
-            "unit": "m2",
-            "justification": "Measurement context not confirmed"
-        }
+    ok, reason = validate_geometry(
+        entries,
+        context,
+        RULE_REQUIREMENTS["plastering"]
+    )
 
-    if not context.storey_height:
+    if not ok:
         return {
-            "quantity": 0,
+            "quantity": 0.0,
             "unit": "m2",
-            "justification": "Storey height missing"
-        }
-
-    # 🔒 geometry availability guard
-    if not any(e.get("perimeter") or e.get("length") for e in entries):
-        return {
-            "quantity": 0,
-            "unit": "m2",
-            "justification": "Geometry not available from drawings"
+            "justification": reason,
+            "confidence": 0.0
         }
 
     total = 0.0
     for e in entries:
-        perimeter = e.get("perimeter") or e.get("length") or 0.0
-        total += float(perimeter) * context.storey_height
+        perimeter = _safe_float(e.get("perimeter") or e.get("length"))
+        total += perimeter * context.storey_height
+
+    confidence = compute_quantity_confidence(
+        entries,
+        context,
+        RULE_REQUIREMENTS["plastering"]
+    )
 
     return {
         "quantity": round(total, 2),
         "unit": "m2",
-        "justification": "Perimeter × confirmed storey height"
+        "justification": "Perimeter × confirmed storey height",
+        "confidence": confidence
     }
 
-# geometry_rules.py
-
+    
 def painting(entries, context):
-    if not context.confirmed:
-        return {
-            "quantity": 0,
-            "unit": "m2",
-            "justification": "Measurement context not confirmed"
-        }
+    ok, reason = validate_geometry(
+        entries,
+        context,
+        RULE_REQUIREMENTS["painting"]
+    )
 
-    if not context.storey_height:
+    if not ok:
         return {
-            "quantity": 0,
+            "quantity": 0.0,
             "unit": "m2",
-            "justification": "Storey height missing"
-        }
-
-    # 🔒 geometry availability guard
-    if not any(e.get("perimeter") or e.get("length") for e in entries):
-        return {
-            "quantity": 0,
-            "unit": "m2",
-            "justification": "Geometry not available from drawings"
+            "justification": reason,
+            "confidence": 0.0
         }
 
     total = 0.0
     for e in entries:
-        perimeter = e.get("perimeter") or e.get("length") or 0.0
-        total += float(perimeter) * context.storey_height
+        perimeter = _safe_float(e.get("perimeter") or e.get("length"))
+        total += perimeter * context.storey_height
+
+    confidence = compute_quantity_confidence(
+        entries,
+        context,
+        RULE_REQUIREMENTS["painting"]
+    )
 
     return {
         "quantity": round(total, 2),
         "unit": "m2",
-        "justification": "Perimeter × confirmed storey height"
+        "justification": "Perimeter × confirmed storey height",
+        "confidence": confidence
     }
 
 # -------------------------------
@@ -131,31 +174,18 @@ def painting(entries, context):
 # -------------------------------
 
 def floor_area(entries, context):
-    """
-    Floor / ceiling / slab areas (m2).
+    ok, reason = validate_geometry(
+        entries,
+        context,
+        RULE_REQUIREMENTS["tiling"]
+    )
 
-    Accepts:
-    - explicit area from parser
-    - OR length × width
-    - Context-aware guards
-    """
-
-    if not context.confirmed:
+    if not ok:
         return {
             "quantity": 0.0,
             "unit": "m2",
-            "justification": "Measurement context not confirmed"
-        }
-
-    # Geometry availability guard
-    if not any(
-        e.get("area") or (e.get("length") and e.get("width"))
-        for e in entries
-    ):
-        return {
-            "quantity": 0.0,
-            "unit": "m2",
-            "justification": "Floor geometry not available from drawings"
+            "justification": reason,
+            "confidence": 0.0
         }
 
     total = 0.0
@@ -163,63 +193,114 @@ def floor_area(entries, context):
 
     for e in entries:
         area = _safe_float(e.get("area"))
-
         if area <= 0:
-            length = _safe_float(e.get("length"))
-            width = _safe_float(e.get("width"))
-            area = length * width
+            area = _safe_float(e.get("length")) * _safe_float(e.get("width"))
 
         if area > 0:
             total += area
-            parts.append(f"{e.get('Room','?')}: {area:.2f} m2")
+            parts.append(f"{e.get('Room','?')}: {area:.2f}")
 
+    confidence = compute_quantity_confidence(
+        entries,
+        context,
+        RULE_REQUIREMENTS["tiling"]
+    )
+    
     return {
         "quantity": round(total, 2),
         "unit": "m2",
-        "justification": "; ".join(parts)
+        "justification": "; ".join(parts),
+        "confidence": confidence
     }
+
 
 # -------------------------------
 # SKIRTING (m)
 # -------------------------------
 
-def skirting(entries: List[Dict[str, Any]], context: MeasurementContext):
-    """
-    Skirting length = wall perimeter minus openings widths
-    """
-    ok, reason = _context_guard(context, [])
+def skirting(entries, context):
+    ok, reason = validate_geometry(
+        entries,
+        context,
+        RULE_REQUIREMENTS["skirting"]
+    )
+
     if not ok:
-        return {"quantity": 0.0, "unit": "m", "justification": reason}
+        return {
+            "quantity": 0.0,
+            "unit": "m2",
+            "justification": reason,
+            "confidence": 0.0
+        }
 
     total = 0.0
     parts = []
 
     for e in entries:
         perimeter = _safe_float(e.get("perimeter") or e.get("length"))
-        openings = _safe_float(e.get("openings_width") or 0)
+        openings = _safe_float(e.get("openings_width"))
 
         net = max(0.0, perimeter - openings)
         total += net
         parts.append(f"{e.get('Room','?')}: {net:.2f}")
 
+    confidence = compute_quantity_confidence(
+        entries,
+        context,
+        RULE_REQUIREMENTS["skirting"]
+    )
+    
     return {
         "quantity": round(total, 4),
         "unit": "m",
-        "justification": "; ".join(parts)
+        "justification": "; ".join(parts),
+        "confidence": confidence
     }
-
 
 # -------------------------------
 # OPENINGS (No.)
 # -------------------------------
+def compute_openings_confidence(entries, context):
+    """
+    Confidence for doors/windows counting
+    """
+    if not context.confirmed:
+        return 0.0
 
-def count_openings(entries: List[Dict[str, Any]], context: MeasurementContext):
+    explicit = 0
+    inferred = 0
+
+    for e in entries:
+        if e.get("Quantity") is not None or e.get("Qty") is not None:
+            explicit += 1
+        else:
+            inferred += 1
+
+    total = explicit + inferred
+    if total == 0:
+        return 0.0
+
+    ratio = explicit / total
+
+    # Weighted confidence
+    confidence = 0.6 + (0.4 * ratio)
+
+    return round(min(confidence, 1.0), 2)
+
+def count_openings(
+    entries: List[Dict[str, Any]],
+    context: MeasurementContext,
+    item_key: str
+):
     """
-    Doors / Windows count
+    Doors / Windows count (context-aware + confidence-scored)
     """
-    ok, reason = _context_guard(context, [])
+
+    ok, fail = rule_guard(item_key, entries, context)
     if not ok:
-        return {"quantity": 0, "unit": "No.", "justification": reason}
+        fail["unit"] = "No."
+        fail["confidence"] = 0.0
+        return fail
 
     total = 0
     parts = []
@@ -230,27 +311,33 @@ def count_openings(entries: List[Dict[str, Any]], context: MeasurementContext):
         total += q
         parts.append(f"{e.get('Room','?')}: {q}")
 
+    confidence = compute_openings_confidence(entries, context)
+
     return {
         "quantity": total,
         "unit": "No.",
-        "justification": "; ".join(parts)
+        "justification": "; ".join(parts),
+        "confidence": confidence
     }
-
 
 # -------------------------------
 # CONCRETE (m3)
 # -------------------------------
 
-def reinforced_concrete(entries: List[Dict[str, Any]], context: MeasurementContext):
-    """
-    Concrete volumes:
-    - area × slab_thickness
-    """
-    REQUIRES = ["slab_thickness"]
+def reinforced_concrete(entries, context):
+    ok, reason = validate_geometry(
+        entries,
+        context,
+        RULE_REQUIREMENTS["reinforced concrete"]
+    )
 
-    ok, reason = _context_guard(context, REQUIRES)
     if not ok:
-        return {"quantity": 0.0, "unit": "m3", "justification": reason}
+        return {
+            "quantity": 0.0,
+            "unit": "m2",
+            "justification": reason,
+            "confidence": 0.0
+        }
 
     total = 0.0
     parts = []
@@ -266,13 +353,56 @@ def reinforced_concrete(entries: List[Dict[str, Any]], context: MeasurementConte
             f"{e.get('Room','?')}: {area:.2f} × {context.slab_thickness:.2f}"
         )
 
+    confidence = compute_quantity_confidence(
+        entries,
+        context,
+        RULE_REQUIREMENTS["reinforced concrete"]
+    )
+    
     return {
         "quantity": round(total, 4),
         "unit": "m3",
-        "justification": "; ".join(parts)
+        "justification": "; ".join(parts),
+        "confidence": confidence
     }
 
+def validate_geometry(entries, context, requires):
+    missing = set()
 
+    for r in requires:
+        if hasattr(context, r):
+            if getattr(context, r) in (None, 0):
+                missing.add(r)
+        else:
+            if not any(e.get(r) for e in entries):
+                missing.add(r)
+
+    if missing:
+        return False, f"Missing geometry: {', '.join(sorted(missing))}"
+
+    return True, ""
+def rule_guard(rule_name: str, entries, context):
+    """
+    Standard guard applied to ALL geometry rules.
+    """
+    if not context.confirmed:
+        return False, {
+            "quantity": 0.0,
+            "unit": None,
+            "justification": "Measurement context not confirmed"
+        }
+
+    requires = RULE_REQUIREMENTS.get(rule_name, [])
+    ok, reason = validate_geometry(entries, context, requires)
+
+    if not ok:
+        return False, {
+            "quantity": 0.0,
+            "unit": None,
+            "justification": reason
+        }
+
+    return True, None
 # -------------------------------
 # RULE REGISTRY
 # -------------------------------
@@ -300,5 +430,6 @@ RULE_REGISTRY = {
     "reinforced concrete": reinforced_concrete,
     "concrete": reinforced_concrete,
 }
+
 
 
