@@ -280,61 +280,57 @@ def aggregate_parsed_entries(parsed_entries):
 # ---------------- Geometry-based computation ----------------
 
 def compute_quantities_from_geometry(agg, context, defaults=None):
+    from cross_drawing_validation import (
+        validate_quantity_consistency,
+        validate_geometry_consistency
+    )
+
     if defaults is None:
         defaults = DEFAULTS
 
     computed = {}
-
-    CONTEXT_AWARE_RULES = {
-        "plastering",
-        "painting",
-        "blockwork",
-        "partition walls",
-        "skirting",
-        "reinforced concrete",
-        "concrete",
-        "doors",
-        "windows",
-        "tiling",
-        "ceiling",
-        "ground floor slab",
-    }
 
     for canonical_key, payload in agg.items():
         key = canonical_key.lower()
         handler = RULE_REGISTRY.get(key)
 
         if handler is None:
-            # fallback to numeric quantities
             units = payload.get("units", {})
             qty = sum(units.values()) if units else 0.0
             computed[key] = {
                 "quantity": round(qty, 4),
                 "unit": next(iter(units.keys()), None),
-                "justification": "Fallback to parsed numeric quantities"
+                "justification": "Fallback to parsed numeric quantities",
+                "confidence": 0.4
             }
             continue
 
-        try:
-            if key in CONTEXT_AWARE_RULES:
-                res = handler(payload["entries"], context)
-            else:
-                res = handler(payload["entries"], defaults)
+        res = handler(payload["entries"], context)
+        confidence = res.get("confidence", 1.0)
+        notes = []
 
-            computed[key] = {
-                "quantity": float(res.get("quantity", 0.0)),
-                "unit": res.get("unit"),
-                "justification": res.get("justification", "")
-            }
+        ok, penalty, msg = validate_quantity_consistency(payload["entries"])
+        if not ok:
+            confidence -= penalty
+            notes.append(msg)
 
-        except Exception as ex:
-            units = payload.get("units", {})
-            qty = sum(units.values()) if units else 0.0
-            computed[key] = {
-                "quantity": round(qty, 4),
-                "unit": next(iter(units.keys()), None),
-                "justification": f"Handler failure fallback ({ex})"
-            }
+        ok, penalty, msg = validate_geometry_consistency(
+            payload["entries"], "storey_height"
+        )
+        if not ok:
+            confidence -= penalty
+            notes.append(msg)
+
+        confidence = max(round(confidence, 2), 0.0)
+
+        computed[key] = {
+            "quantity": round(float(res.get("quantity", 0.0)), 4),
+            "unit": res.get("unit"),
+            "justification": res.get("justification", "") + (
+                " | Cross-check: " + " ; ".join(notes) if notes else ""
+            ),
+            "confidence": confidence
+        }
 
     return computed
 
@@ -383,13 +379,33 @@ def populate_besmm4_from_parsed(parsed_entries, context, location="Kaduna", incl
     for canonical_key, res in computed.items():
         qty = res.get("quantity", 0.0)
         just = res.get("justification", "")
-        conf = res.get("confidence", 0.0)
+        confidence = res.get("confidence", 1.0)
+
+        it["Quantity"] = qty
+        it["Justification"] = just
+        it["Confidence"] = confidence
+
+        if confidence >= 0.85:
+            it["Status"] = "OK"
+        elif confidence >= 0.60:
+            it["Status"] = "REVIEW"
+        else:
+            it["Status"] = "REVIEW_REQUIRED"
+
 
         if canonical_key in canonical_to_items:
             for it in canonical_to_items[canonical_key]:
                 it["Quantity"] = float(round(qty, 4))
                 it["Justification"] = just
-                it["Confidence"] = conf
+                it["Confidence"] = confidence
+
+                # 🚨 QS PROFESSIONAL GATE
+                if it["Confidence"] < 0.6:
+                    raise RuntimeError(
+                        f"QS review required: low confidence ({it['Confidence']}) "
+                        f"for item {it['ItemCode']} – {it['Description']}"
+                    )
+
         else:
             matched = False
             for can_k, its in canonical_to_items.items():
@@ -397,7 +413,7 @@ def populate_besmm4_from_parsed(parsed_entries, context, location="Kaduna", incl
                     for it in its:
                         it["Quantity"] = float(round(qty, 4))
                         it["Justification"] = just
-                        it["Confidence"] = conf
+                        it["Confidence"] = confidence
                     matched = True
                     if DIAGNOSTIC:
                         print("Fuzzy matched", canonical_key, "->", can_k)

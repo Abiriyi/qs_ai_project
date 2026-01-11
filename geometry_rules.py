@@ -61,20 +61,12 @@ def _context_guard(context: MeasurementContext, requires: List[str]):
 
 def compute_quantity_confidence(entries, context, requires):
     """
-    Computes confidence score (0–1) for a quantity based on:
-    - Context confirmation
-    - Availability of required geometry
-    - Source reliability
+    Confidence scoring based on geometry + context completeness.
     """
-
     score = 1.0
-
-    # Context confirmation is mandatory
-    if not context.confirmed:
-        return 0.0
-
-    # Penalise missing requirements
     missing = 0
+    total = len(requires)
+
     for r in requires:
         if hasattr(context, r):
             if getattr(context, r) in (None, 0):
@@ -83,20 +75,14 @@ def compute_quantity_confidence(entries, context, requires):
             if not any(e.get(r) for e in entries):
                 missing += 1
 
-    if requires:
-        score *= max(0.0, 1 - (missing / len(requires)))
+    if total > 0:
+        score -= missing / total
 
-    # Source-based confidence modifier
-    source_factor = {
-        "bim": 1.0,
-        "user": 0.9,
-        "ai": 0.75
-    }.get(context.source, 0.7)
+    if not context.confirmed:
+        score -= 0.2
 
-    score *= source_factor
+    return max(round(score, 2), 0.0)
 
-    # Clamp to [0,1]
-    return round(min(max(score, 0.0), 1.0), 2)
 
 # -------------------------------
 # WALL-BASED MEASUREMENTS (m2)
@@ -108,7 +94,6 @@ def plastering(entries, context):
         context,
         RULE_REQUIREMENTS["plastering"]
     )
-
     if not ok:
         return {
             "quantity": 0.0,
@@ -134,15 +119,13 @@ def plastering(entries, context):
         "justification": "Perimeter × confirmed storey height",
         "confidence": confidence
     }
-
-    
-def painting(entries, context):
+   
+def paintng(entries, context):
     ok, reason = validate_geometry(
         entries,
         context,
         RULE_REQUIREMENTS["painting"]
     )
-
     if not ok:
         return {
             "quantity": 0.0,
@@ -287,15 +270,7 @@ def compute_openings_confidence(entries, context):
 
     return round(min(confidence, 1.0), 2)
 
-def count_openings(
-    entries: List[Dict[str, Any]],
-    context: MeasurementContext,
-    item_key: str
-):
-    """
-    Doors / Windows count (context-aware + confidence-scored)
-    """
-
+def count_openings(entries, context, item_key="doors"):
     ok, fail = rule_guard(item_key, entries, context)
     if not ok:
         fail["unit"] = "No."
@@ -306,12 +281,15 @@ def count_openings(
     parts = []
 
     for e in entries:
-        qty = e.get("Quantity") or e.get("Qty")
-        q = int(_safe_float(qty, fallback=1))
+        q = int(_safe_float(e.get("Quantity") or e.get("Qty"), fallback=1))
         total += q
         parts.append(f"{e.get('Room','?')}: {q}")
 
-    confidence = compute_openings_confidence(entries, context)
+    confidence = compute_quantity_confidence(
+        entries,
+        context,
+        RULE_REQUIREMENTS[item_key]
+    )
 
     return {
         "quantity": total,
