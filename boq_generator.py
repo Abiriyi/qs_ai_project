@@ -20,6 +20,9 @@ from openpyxl.utils import get_column_letter
 from ai_pricing import get_rate_from_library
 from geometry_rules import RULE_REGISTRY
 from measurement_context import MeasurementContext
+from compute_quantities_from_geometry import compute_quantities_from_geometry
+from populate_besmm4_from_parsed import populate_besmm4_from_parsed
+from qs_review import enforce_qs_review
 
 # ---------- Config ----------
 DEFAULT_RATE = 0.0
@@ -277,63 +280,6 @@ def aggregate_parsed_entries(parsed_entries):
 
     return agg
 
-# ---------------- Geometry-based computation ----------------
-
-def compute_quantities_from_geometry(agg, context, defaults=None):
-    from cross_drawing_validation import (
-        validate_quantity_consistency,
-        validate_geometry_consistency
-    )
-
-    if defaults is None:
-        defaults = DEFAULTS
-
-    computed = {}
-
-    for canonical_key, payload in agg.items():
-        key = canonical_key.lower()
-        handler = RULE_REGISTRY.get(key)
-
-        if handler is None:
-            units = payload.get("units", {})
-            qty = sum(units.values()) if units else 0.0
-            computed[key] = {
-                "quantity": round(qty, 4),
-                "unit": next(iter(units.keys()), None),
-                "justification": "Fallback to parsed numeric quantities",
-                "confidence": 0.4
-            }
-            continue
-
-        res = handler(payload["entries"], context)
-        confidence = res.get("confidence", 1.0)
-        notes = []
-
-        ok, penalty, msg = validate_quantity_consistency(payload["entries"])
-        if not ok:
-            confidence -= penalty
-            notes.append(msg)
-
-        ok, penalty, msg = validate_geometry_consistency(
-            payload["entries"], "storey_height"
-        )
-        if not ok:
-            confidence -= penalty
-            notes.append(msg)
-
-        confidence = max(round(confidence, 2), 0.0)
-
-        computed[key] = {
-            "quantity": round(float(res.get("quantity", 0.0)), 4),
-            "unit": res.get("unit"),
-            "justification": res.get("justification", "") + (
-                " | Cross-check: " + " ; ".join(notes) if notes else ""
-            ),
-            "confidence": confidence
-        }
-
-    return computed
-
 # ---------------- Template population ----------------
 
 def _build_full_item_list(include_empty=True):
@@ -358,103 +304,6 @@ def _build_full_item_list(include_empty=True):
                     "Justification": ""
                 })
     return items
-
-def populate_besmm4_from_parsed(parsed_entries, context, location="Kaduna", include_empty=True):
-    """
-    Map parsed entries into BESMM4 master items using computed geometry quantities.
-    """
-    if DIAGNOSTIC:
-        print("Starting populate_besmm4_from_parsed with", len(parsed_entries), "entries")
-
-    agg = aggregate_parsed_entries(parsed_entries)
-    computed = compute_quantities_from_geometry(agg, defaults=DEFAULTS)
-    items = _build_full_item_list(include_empty=include_empty)
-    
-    # Create reverse map: canonical.lower() -> item record(s)
-    canonical_to_items = defaultdict(list)
-    for it in items:
-        canonical_to_items[(it["Canonical"] or it["Description"]).lower()].append(it)
-
-    # Map computed quantities into template items
-    for canonical_key, res in computed.items():
-        qty = res.get("quantity", 0.0)
-        just = res.get("justification", "")
-        confidence = res.get("confidence", 1.0)
-
-        it["Quantity"] = qty
-        it["Justification"] = just
-        it["Confidence"] = confidence
-
-        if confidence >= 0.85:
-            it["Status"] = "OK"
-        elif confidence >= 0.60:
-            it["Status"] = "REVIEW"
-        else:
-            it["Status"] = "REVIEW_REQUIRED"
-
-
-        if canonical_key in canonical_to_items:
-            for it in canonical_to_items[canonical_key]:
-                it["Quantity"] = float(round(qty, 4))
-                it["Justification"] = just
-                it["Confidence"] = confidence
-
-                # 🚨 QS PROFESSIONAL GATE
-                if it["Confidence"] < 0.6:
-                    raise RuntimeError(
-                        f"QS review required: low confidence ({it['Confidence']}) "
-                        f"for item {it['ItemCode']} – {it['Description']}"
-                    )
-
-        else:
-            matched = False
-            for can_k, its in canonical_to_items.items():
-                if canonical_key in can_k or can_k in canonical_key:
-                    for it in its:
-                        it["Quantity"] = float(round(qty, 4))
-                        it["Justification"] = just
-                        it["Confidence"] = confidence
-                    matched = True
-                    if DIAGNOSTIC:
-                        print("Fuzzy matched", canonical_key, "->", can_k)
-                    break
-            if not matched and DIAGNOSTIC:
-                print("No template item matched for computed key:", canonical_key)
-
-    # As a final fallback, if some items remain zero but agg contains numeric totals, try to map them
-    for key, payload in agg.items():
-        total_qty = sum(payload.get("units", {}).values())
-        if total_qty <= 0:
-            continue
-        # try to find template items whose canonical contains key
-        for can_k, its in canonical_to_items.items():
-            if key in can_k or can_k in key:
-                for it in its:
-                    if it["Quantity"] == 0:
-                        it["Quantity"] = float(round(total_qty, 4))
-                        it["Justification"] = "Fallback mapped from parsed totals"
-                        if DIAGNOSTIC:
-                            print("Fallback mapped", key, "->", can_k, total_qty)
-    # --- Confidence enforcement gate ---
-    for it in items:
-        if it.get("Confidence", 1.0) < 0.6:
-            raise RuntimeError(
-                f"Low confidence quantity for {it['ItemCode']} — review required"
-            )
-
-    # Rate lookup and amount calc
-    for it in items:
-        try:
-            rate = get_rate_from_library(it["Canonical"], it["Description"], it["Unit"], location=location)
-        except Exception:
-            rate = None
-        if rate is None:
-            rate = DEFAULT_RATE
-        it["Rate"] = float(rate)
-        it["Amount"] = round(it["Quantity"] * it["Rate"], 2)
-    
-    df = pd.DataFrame(items)
-    return df
 
 def export_besmm4_using_template(populated_df: pd.DataFrame, output_path: str, template_path: str = None):
     if template_path is None:
@@ -572,7 +421,7 @@ def export_besmm4_using_template(populated_df: pd.DataFrame, output_path: str, t
     if audit_name in wb.sheetnames:
         wb.remove(wb[audit_name])
     audit = wb.create_sheet(audit_name)
-    audit.append(["ItemCode", "Description", "Unit", "Quantity", "Rate", "Amount", "Confidence", "Justification"])
+    audit.append(["ItemCode", "Description", "Unit", "Quantity", "Rate", "Amount", "Confidence", "Status", "Justification"])
     for _, row in populated_df.iterrows():
         audit.append([
         row["ItemCode"],
@@ -582,6 +431,7 @@ def export_besmm4_using_template(populated_df: pd.DataFrame, output_path: str, t
         float(row["Rate"] or 0.0),
         float(row["Amount"] or 0.0),
         float(row.get("Confidence", 0.0)),
+        row["Status"],
         row.get("Justification", "")
     ])
 
@@ -591,9 +441,15 @@ def export_besmm4_using_template(populated_df: pd.DataFrame, output_path: str, t
     return output_path
 
 # public
-def generate_besmm4_boq(parsed_entries: list, output_path: str, location: str = "Kaduna", template_path: str = None, diagnostic: bool = False):
+def generate_besmm4_boq(
+    parsed_entries: list,
+    output_path: str,
+    location: str = "Kaduna",
+    template_path: str = None,
+    diagnostic: bool = False
+):
     """
-    Entry point.
+    Entry point – orchestration only.
     """
     global DIAGNOSTIC
     DIAGNOSTIC = bool(diagnostic)
@@ -604,24 +460,37 @@ def generate_besmm4_boq(parsed_entries: list, output_path: str, location: str = 
     if template_path is None:
         template_path = TEMPLATE_PATH
 
+    # ---------------- Measurement Context ----------------
     context = MeasurementContext(
-    scale=0.01,                       # 1:100
-    storey_height=3.0,                # metres
-    slab_thickness=0.15,
-    confirmed=True,
-    source="ai",
-    scale_confidence=0.7,
-    storey_height_confidence=0.7
-)
+        scale=0.01,                      # 1:100
+        storey_height=3.0,
+        slab_thickness=0.15,
+        confirmed=True,
+        source="ai",
+        scale_confidence=0.7,
+        storey_height_confidence=0.7
+    )
 
-    populated = populate_besmm4_from_parsed(
-    parsed_entries,
-    context=context,
-    location=location
-)
-    out = export_besmm4_using_template(populated, output_path, template_path=template_path)
+    # ---------------- BoQ Population ----------------
+    df = populate_besmm4_from_parsed(
+        parsed_entries,
+        context=context,
+        location=location
+    )
+
+    # ---------------- QS REVIEW GATE ----------------
+    enforce_qs_review(df.to_dict("records"))
+
+    # ---------------- Export ----------------
+    out = export_besmm4_using_template(
+        df,
+        output_path,
+        template_path=template_path
+    )
+
     if DIAGNOSTIC:
-        print("Generated:", out)
+        print("Generated BoQ:", out)
+
     return out
 
 if __name__ == "__main__":
