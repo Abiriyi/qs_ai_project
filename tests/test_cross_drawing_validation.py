@@ -1,4 +1,4 @@
-from cross_drawing_validation import validate_geometry_consistency
+from qs_ai.cross_drawing_validation import validate_geometry_consistency
 
 def test_storey_height_inconsistency():
     entries = [

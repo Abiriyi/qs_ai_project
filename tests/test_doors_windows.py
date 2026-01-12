@@ -1,4 +1,4 @@
-from geometry_rules import count_openings
+from qs_ai.geometry_rules import count_openings
 
 def test_doors_basic_count(default_context):
     entries = [

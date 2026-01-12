@@ -1,4 +1,4 @@
-from geometry_rules import count_openings
+from qs_ai.geometry_rules import count_openings
 
 def test_missing_quantity_reduces_confidence(default_context):
     entries = [

@@ -1,5 +1,5 @@
 import pytest
-from measurement_context import MeasurementContext
+from qs_ai.measurement_context import MeasurementContext
 
 @pytest.fixture
 def default_context():

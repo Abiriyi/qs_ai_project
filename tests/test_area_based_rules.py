@@ -1,4 +1,4 @@
-from geometry_rules import plastering_rule
+from qs_ai.geometry_rules import plastering_rule
 
 def test_plastering_area(default_context):
     entries = [

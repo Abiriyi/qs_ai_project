@@ -1,4 +1,4 @@
-from geometry_rules import reinforced_concrete_rule
+from qs_ai.geometry_rules import reinforced_concrete_rule
 
 def test_rc_volume(default_context):
     entries = [
