@@ -18,11 +18,14 @@ import pandas as pd
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
 from ai_pricing import get_rate_from_library
-from geometry_rules import RULE_REGISTRY
-from measurement_context import MeasurementContext
-from compute_quantities_from_geometry import compute_quantities_from_geometry
-from populate_besmm4_from_parsed import populate_besmm4_from_parsed
-from qs_review import enforce_qs_review
+from qs_ai.geometry_rules import RULE_REGISTRY
+from qs_ai.cross_drawing_validation import (
+    validate_quantity_consistency,
+    validate_geometry_consistency,
+)
+from qs_ai.measurement_context import MeasurementContext
+from qs_ai.compute_quantities_from_geometry import compute_quantities_from_geometry
+from qs_ai.qs_review import enforce_qs_review
 
 # ---------- Config ----------
 DEFAULT_RATE = 0.0
@@ -496,5 +499,65 @@ def generate_besmm4_boq(
 if __name__ == "__main__":
     print("This module provides generate_besmm4_boq(parsed_entries, output_path, ...)")
 
+def populate_besmm4_from_parsed(parsed_entries, context, location="Kaduna", include_empty=True):
+
+    agg = aggregate_parsed_entries(parsed_entries)
+    computed = compute_quantities_from_geometry(agg, context=context)
+    items = _build_full_item_list(include_empty=include_empty)
+
+    # Canonical lookup
+    canonical_to_items = defaultdict(list)
+    for it in items:
+        canonical_to_items[(it["Canonical"] or it["Description"]).lower()].append(it)
+
+    # ---------------- Mapping computed quantities ----------------
+    for canonical_key, res in computed.items():
+        qty = res.get("quantity", 0.0)
+        just = res.get("justification", "")
+        confidence = res.get("confidence", 1.0)
+
+        if canonical_key in canonical_to_items:
+            for it in canonical_to_items[canonical_key]:
+                it["Quantity"] = round(float(qty), 4)
+                it["Justification"] = just
+                it["Confidence"] = confidence
+
+                if confidence >= 0.85:
+                    it["Status"] = "OK"
+                elif confidence >= 0.60:
+                    it["Status"] = "REVIEW"
+                else:
+                    it["Status"] = "REVIEW_REQUIRED"
+
+        else:
+            # Fuzzy fallback
+            for can_k, its in canonical_to_items.items():
+                if canonical_key in can_k or can_k in canonical_key:
+                    for it in its:
+                        it["Quantity"] = round(float(qty), 4)
+                        it["Justification"] = just
+                        it["Confidence"] = confidence
+                        it["Status"] = "REVIEW"
+                    break
+
+    # ---------------- Rate & amount ----------------
+    for it in items:
+        rate = get_rate_from_library(
+            it["Canonical"],
+            it["Description"],
+            it["Unit"],
+            location=location
+        ) or DEFAULT_RATE
+
+        it["Rate"] = float(rate)
+        it["Amount"] = round(it["Quantity"] * it["Rate"], 2)
+    
+    for it in items:
+        if it.get("Confidence", 1.0) < 0.6:
+            raise RuntimeError(
+                f"QS review required: low confidence for {it['Description']}"
+            )
+
+    return pd.DataFrame(items)
 
 

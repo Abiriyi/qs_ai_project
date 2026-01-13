@@ -26,21 +26,16 @@ def validate_quantity_consistency(entries):
 
     return False, penalty, msg
 
-def validate_geometry_consistency(entries, key):
-    """
-    Example keys: 'storey_height', 'slab_thickness'
-    """
-    values = set()
+def validate_geometry_consistency(entries, field):
+    values = [e.get(field) for e in entries if e.get(field) is not None]
 
-    for e in entries:
-        v = e.get(key)
-        if v:
-            values.add(round(float(v), 3))
+    if len(values) < 2:
+        return True, 0.0, "Insufficient data for consistency check"
 
-    if len(values) <= 1:
-        return True, 0.0, "Geometry consistent"
+    ref = values[0]
+    for v in values[1:]:
+        if abs(v - ref) > 0.15:
+            return False, 0.3, f"Inconsistent {field} values"
 
-    penalty = 0.2
-    msg = f"Inconsistent {key}: {sorted(values)}"
+    return True, 0.0, f"{field} values consistent"
 
-    return False, penalty, msg

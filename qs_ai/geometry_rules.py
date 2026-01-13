@@ -17,7 +17,7 @@ This file is QS-grade and audit-safe.
 """
 
 from typing import List, Dict, Any
-from measurement_context import MeasurementContext
+from qs_ai.measurement_context import MeasurementContext
 
 
 # -------------------------------
@@ -88,69 +88,83 @@ def compute_quantity_confidence(entries, context, requires):
 # WALL-BASED MEASUREMENTS (m2)
 # -------------------------------
 
-def plastering(entries, context):
-    ok, reason = validate_geometry(
-        entries,
-        context,
-        RULE_REQUIREMENTS["plastering"]
-    )
-    if not ok:
+def plastering_rule(entries, context):
+    if not context.confirmed:
         return {
             "quantity": 0.0,
             "unit": "m2",
-            "justification": reason,
-            "confidence": 0.0
+            "justification": "Measurement context not confirmed",
+            "confidence": 0.0,
         }
 
-    total = 0.0
-    for e in entries:
-        perimeter = _safe_float(e.get("perimeter") or e.get("length"))
-        total += perimeter * context.storey_height
+    total_length = 0.0
+    height = context.storey_height
 
-    confidence = compute_quantity_confidence(
-        entries,
-        context,
-        RULE_REQUIREMENTS["plastering"]
-    )
+    for e in entries:
+        length = e.get("length")
+        h = e.get("height") or height
+        if length and h:
+            total_length += float(length)
+
+    if total_length == 0 or not height:
+        return {
+            "quantity": 0.0,
+            "unit": "m2",
+            "justification": "Insufficient wall geometry",
+            "confidence": 0.4,
+        }
+
+    area = total_length * height
 
     return {
-        "quantity": round(total, 2),
+        "quantity": round(area, 2),
         "unit": "m2",
-        "justification": "Perimeter × confirmed storey height",
-        "confidence": confidence
+        "justification": "Σ wall lengths × storey height",
+        "confidence": min(
+            context.scale_confidence,
+            context.storey_height_confidence,
+        ),
     }
+
    
-def paintng(entries, context):
-    ok, reason = validate_geometry(
-        entries,
-        context,
-        RULE_REQUIREMENTS["painting"]
-    )
-    if not ok:
+def painting_rule(entries, context):
+    if not context.confirmed:
         return {
             "quantity": 0.0,
             "unit": "m2",
-            "justification": reason,
-            "confidence": 0.0
+            "justification": "Measurement context not confirmed",
+            "confidence": 0.0,
         }
 
-    total = 0.0
-    for e in entries:
-        perimeter = _safe_float(e.get("perimeter") or e.get("length"))
-        total += perimeter * context.storey_height
+    total_length = 0.0
+    height = context.storey_height
 
-    confidence = compute_quantity_confidence(
-        entries,
-        context,
-        RULE_REQUIREMENTS["painting"]
-    )
+    for e in entries:
+        length = e.get("length")
+        h = e.get("height") or height
+        if length and h:
+            total_length += float(length)
+
+    if total_length == 0 or not height:
+        return {
+            "quantity": 0.0,
+            "unit": "m2",
+            "justification": "Insufficient wall geometry",
+            "confidence": 0.4,
+        }
+
+    area = total_length * height
 
     return {
-        "quantity": round(total, 2),
+        "quantity": round(area, 2),
         "unit": "m2",
-        "justification": "Perimeter × confirmed storey height",
-        "confidence": confidence
+        "justification": "Σ wall lengths × storey height",
+        "confidence": min(
+            context.scale_confidence,
+            context.storey_height_confidence,
+        ),
     }
+
 
 # -------------------------------
 # FLOOR / CEILING (m2)
@@ -270,78 +284,64 @@ def compute_openings_confidence(entries, context):
 
     return round(min(confidence, 1.0), 2)
 
-def count_openings(entries, context, item_key="doors"):
-    ok, fail = rule_guard(item_key, entries, context)
-    if not ok:
-        fail["unit"] = "No."
-        fail["confidence"] = 0.0
-        return fail
-
+def count_openings(entries, context, item_key):
     total = 0
+    assumed = 0
     parts = []
 
     for e in entries:
-        q = int(_safe_float(e.get("Quantity") or e.get("Qty"), fallback=1))
-        total += q
-        parts.append(f"{e.get('Room','?')}: {q}")
+        room = e.get("Room", "?")
+        qty = e.get("Quantity") or e.get("Qty")
 
-    confidence = compute_quantity_confidence(
-        entries,
-        context,
-        RULE_REQUIREMENTS[item_key]
-    )
+        if qty is None:
+            q = 1
+            assumed += 1
+            parts.append(f"{room}: 1 (assumed)")
+        else:
+            q = int(qty)
+            parts.append(f"{room}: {q}")
+
+        total += q
+
+    confidence = 1.0
+    if assumed:
+        confidence -= 0.2 * assumed
 
     return {
         "quantity": total,
         "unit": "No.",
         "justification": "; ".join(parts),
-        "confidence": confidence
+        "confidence": max(round(confidence, 2), 0.3),
     }
 
 # -------------------------------
 # CONCRETE (m3)
 # -------------------------------
 
-def reinforced_concrete(entries, context):
-    ok, reason = validate_geometry(
-        entries,
-        context,
-        RULE_REQUIREMENTS["reinforced concrete"]
-    )
-
-    if not ok:
-        return {
-            "quantity": 0.0,
-            "unit": "m2",
-            "justification": reason,
-            "confidence": 0.0
-        }
-
+def reinforced_concrete_rule(entries, context):
     total = 0.0
-    parts = []
 
     for e in entries:
-        area = _safe_float(e.get("area"))
-        if area <= 0:
-            continue
+        l = e.get("length")
+        w = e.get("width")
+        t = e.get("thickness") or context.slab_thickness
 
-        vol = area * context.slab_thickness
-        total += vol
-        parts.append(
-            f"{e.get('Room','?')}: {area:.2f} × {context.slab_thickness:.2f}"
-        )
+        if l and w and t:
+            total += float(l) * float(w) * float(t)
 
-    confidence = compute_quantity_confidence(
-        entries,
-        context,
-        RULE_REQUIREMENTS["reinforced concrete"]
-    )
-    
+    if total == 0:
+        return {
+            "quantity": 0.0,
+            "unit": "m3",
+            "justification": "Missing RC geometry",
+            "confidence": 0.3,
+        }
+
     return {
-        "quantity": round(total, 4),
+        "quantity": round(total, 3),
         "unit": "m3",
-        "justification": "; ".join(parts),
-        "confidence": confidence
+        "justification": "Length × width × thickness",
+        "confidence": context.scale_confidence,
     }
 
 def validate_geometry(entries, context, requires):
@@ -387,10 +387,10 @@ def rule_guard(rule_name: str, entries, context):
 
 RULE_REGISTRY = {
     # Wall-based
-    "plastering": plastering,
-    "painting": plastering,
-    "blockwork": plastering,
-    "partition walls": plastering,
+    "plastering": plastering_rule,
+    "painting": plastering_rule,
+    "blockwork": plastering_rule,
+    "partition walls": plastering_rule,
 
     # Floor-based
     "tiling": floor_area,
@@ -401,13 +401,16 @@ RULE_REGISTRY = {
     "skirting": skirting,
 
     # Count
-    "doors": count_openings,
-    "windows": count_openings,
+    "doors": lambda entries, context: count_openings(entries, context, "doors"),
+    "windows": lambda entries, context: count_openings(entries, context, "windows"),
 
     # Volume
-    "reinforced concrete": reinforced_concrete,
-    "concrete": reinforced_concrete,
+    "reinforced concrete": reinforced_concrete_rule,
+    "concrete": reinforced_concrete_rule,
 }
 
+# --- Public rule aliases (test + API stability) ---
 
-
+floor_area_rule = floor_area
+skirting_rule = skirting
+count_openings_rule = count_openings
