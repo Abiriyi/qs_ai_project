@@ -1,4 +1,4 @@
-from boq_generator import aggregate_parsed_entries, compute_quantities_from_geometry, _build_full_item_list, get_rate_from_library, DEFAULT_RATE, pd, defaultdict
+from qs_ai.boq_generator import aggregate_parsed_entries, compute_quantities_from_geometry, _build_full_item_list, get_rate_from_library, DEFAULT_RATE, pd, defaultdict
 def populate_besmm4_from_parsed(parsed_entries, context, location="Kaduna", include_empty=True):
 
     agg = aggregate_parsed_entries(parsed_entries)

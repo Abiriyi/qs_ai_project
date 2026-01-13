@@ -1,7 +1,7 @@
 # compute_quantities_from_geometry.py
 
-from geometry_rules import RULE_REGISTRY
-from cross_drawing_validation import (
+from qs_ai.geometry_rules import RULE_REGISTRY
+from qs_ai.cross_drawing_validation import (
     validate_quantity_consistency,
     validate_geometry_consistency
 )
