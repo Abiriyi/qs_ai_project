@@ -6,7 +6,7 @@ from pdf_parser import extract_pdf_text
 from parse_floorplan import build_boq_entries
 from parse_section import parse_section as parse_section_pdf
 from parse_opening_schedule import parse_opening_schedule
-from boq_generator import generate_besmm4_boq
+from qs_ai.boq_generator import generate_besmm4_boq
 
 load_dotenv()
 
