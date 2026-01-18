@@ -1,9 +1,18 @@
-from dataclasses import dataclass
+from uuid import uuid4
+from qs_ai.commercial.certificate_models import InterimCertificate
 
-@dataclass(frozen=True)
-class InterimCertificate:
-    certificate_id: str
-    valuation_id: str
-    gross_value: float
-    retention_amount: float
-    net_payable: float
+class CertificateEngine:
+
+    def certify(self, valuation):
+        gross = sum(line.value_to_date for line in valuation.lines)
+        retention = round(gross * valuation.retention_percent / 100, 2)
+        net = round(gross - retention, 2)
+
+        return InterimCertificate(
+            certificate_id=str(uuid4()),
+            valuation_id=valuation.valuation_id,
+            gross_value=gross,
+            retention_amount=retention,
+            net_payable=net,
+        )
+
