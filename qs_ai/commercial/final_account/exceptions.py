@@ -1,0 +1,2 @@
+class FinalAccountNotApprovedError(RuntimeError):
+    pass
