@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from qs_ai.commercial.claims.entitlement import EntitlementResult
+from claims.entitlement import EntitlementResult
 
 @dataclass 
 class ClaimValuation:
