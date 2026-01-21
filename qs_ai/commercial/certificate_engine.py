@@ -1,10 +1,14 @@
 from uuid import uuid4
 from qs_ai.commercial.certificate_models import InterimCertificate
 
+from qs_ai.qs_override.approval_guard import require_approval
+
 class CertificateEngine:
 
     def certify(self, valuation):
-        gross = sum(line.value_to_date for line in valuation.lines)
+        require_approval(valuation, stage="Certification")
+
+        gross = sum(l.value_to_date for l in valuation.lines)
         retention = round(gross * valuation.retention_percent / 100, 2)
         net = round(gross - retention, 2)
 
@@ -15,4 +19,5 @@ class CertificateEngine:
             retention_amount=retention,
             net_payable=net,
         )
+
 

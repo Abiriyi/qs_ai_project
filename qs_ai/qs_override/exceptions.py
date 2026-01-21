@@ -12,3 +12,6 @@ class PermissionDeniedError(QSOverrideError):
 
 class WorkflowError(QSOverrideError):
     pass
+
+class ApprovalRequiredError(RuntimeError):
+    pass

@@ -2,8 +2,12 @@ from uuid import uuid4
 from datetime import date
 from qs_ai.audit.change_log import log_event
 from qs_ai.commercial.valuation_models import Valuation, ValuationLine
-
+from qs_ai.qs_override.approval_guard import require_approval
 class ValuationEngine:
+
+    def value(self, boq_items):
+        for item in boq_items:
+            require_approval(item, stage="Valuation")
 
     def create_valuation(
         self,

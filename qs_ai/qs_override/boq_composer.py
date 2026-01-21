@@ -10,7 +10,7 @@ from typing import Dict, List
 from qs_ai.qs_override.models import QSOverrideRecord
 from qs_ai.qs_override.approval_engine import ApprovalState
 from qs_ai.audit.change_log import AuditLog
-
+from qs_ai.qs_override.approval_guard import require_approval
 
 class BoQComposer:
     """
@@ -20,53 +20,14 @@ class BoQComposer:
     def __init__(self, audit_log: AuditLog):
         self.audit_log = audit_log
 
-    def compose(
-        self,
-        computed_boq: Dict[str, Dict],
-        overrides: List[QSOverrideRecord],
-    ) -> Dict[str, Dict]:
-        """
-        Apply approved overrides to computed BoQ quantities.
+    def compose(self, quantity_records):
+        approved = []
 
-        Parameters
-        ----------
-        computed_boq:
-            {
-              item_code: {
-                  quantity, unit, confidence, justification
-              }
-            }
+        for r in quantity_records:
+            require_approval(r, stage="BoQ composition")
+            approved.append(r)
 
-        overrides:
-            List of QSOverrideRecord
-
-        Returns
-        -------
-        Final BoQ dict
-        """
-
-        final_boq = {}
-
-        # Index approved overrides by item code
-        approved_overrides = {
-            o.item_code: o
-            for o in overrides
-            if o.state == ApprovalState.APPROVED
-        }
-
-        for item_code, data in computed_boq.items():
-            if item_code in approved_overrides:
-                override = approved_overrides[item_code]
-
-                final_boq[item_code] = self._apply_override(
-                    item_code=item_code,
-                    computed=data,
-                    override=override,
-                )
-            else:
-                final_boq[item_code] = self._accept_computed(item_code, data)
-
-        return final_boq
+        return approved
 
     # --------------------------------------------------
     # Internal handlers
