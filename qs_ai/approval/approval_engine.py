@@ -2,7 +2,7 @@ from uuid import uuid4
 from datetime import datetime
 from qs_ai.approval.models import ExpertApproval, ApprovalStatus
 from qs_ai.approval.exceptions import ApprovalError
-
+from qs_ai.evidence.capture import capture_evidence
 
 class ApprovalEngine:
 
