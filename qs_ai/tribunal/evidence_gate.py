@@ -1,4 +1,5 @@
 from qs_ai.tribunal.evidence_crossref import EvidenceCrossReferenceEngine
+from typing import List, Dict
 
 class EvidenceSufficiencyGate:
 

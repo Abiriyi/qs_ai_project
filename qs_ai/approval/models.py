@@ -1,25 +1,21 @@
 from dataclasses import dataclass
-from datetime import datetime
 from enum import Enum
-from typing import Optional
+from datetime import datetime
 
 
-class ApprovalStatus(Enum):
-    DRAFT = "draft"
-    SUBMITTED = "submitted"
-    APPROVED = "approved"
-    REJECTED = "rejected"
-    SEALED = "sealed"
+class JointApprovalStatus(str, Enum):
+    DRAFT = "DRAFT"
+    SIGNED_BY_EXPERT_A = "SIGNED_BY_EXPERT_A"
+    SIGNED_BY_EXPERT_B = "SIGNED_BY_EXPERT_B"
+    FULLY_SIGNED = "FULLY_SIGNED"
 
 
 @dataclass(frozen=True)
-class ExpertApproval:
-    approval_id: str
-    artefact_type: str          # "boq", "valuation", "claim", "certificate"
-    artefact_id: str
-    approved_by: str            # QS / Expert name
-    approved_role: str          # "Commercial Manager", "Expert Witness"
-    approval_datetime: datetime
-    status: ApprovalStatus
-    remarks: Optional[str] = None
-    digital_signature: Optional[str] = None
+class JointExpertSignature:
+    expert_id: str
+    name: str
+    role: str
+    organisation: str
+    signed_at: datetime
+    digital_signature: str
+
