@@ -8,3 +8,5 @@ __pycache__/
 *.env
 .coverage
 htmlcov/
+qs_ai/tribunal/pdf_bundle/output/
+*.pdf
