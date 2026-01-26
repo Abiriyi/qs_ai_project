@@ -3,7 +3,7 @@ from datetime import datetime
 from qs_ai.approval.models import ExpertApproval, ApprovalStatus
 from qs_ai.approval.exceptions import ApprovalError
 from qs_ai.evidence.capture import capture_evidence
-
+from qs_ai.approval.models import ExpertApproval, ApprovalStatus
 class ApprovalEngine:
 
     def submit(self, artefact_type, artefact_id):

@@ -10,3 +10,4 @@ __pycache__/
 htmlcov/
 qs_ai/tribunal/pdf_bundle/output/
 *.pdf
+.CommandsFolder
