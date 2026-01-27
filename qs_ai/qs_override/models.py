@@ -23,12 +23,13 @@ class QSOverrideRecord:
 
     # Authority & provenance
     created_by: str = ""
-    created_role: str = ""     # e.g. QS, Senior QS, Associate
+    created_role: str = ""
     created_at: datetime = field(default_factory=datetime.utcnow)
 
     # Approval workflow
-    approval_state: str = "DRAFT"   # DRAFT → SUBMITTED → APPROVED / REJECTED
+    approval_state: str = "DRAFT"
 
     def delta(self) -> float:
         return round(self.overridden_quantity - self.base_quantity, 6)
+
 

@@ -1,11 +1,6 @@
 from qs_ai.qs_override.models import QSOverrideRecord
-from qs_ai.qs_override.exceptions import (
-    InvalidOverrideError,
-    PermissionDeniedError,
-)
+from qs_ai.qs_override.exceptions import InvalidOverrideError
 from qs_ai.evidence.capture import capture_evidence
-
-ALLOWED_ROLES = {"QS", "Senior QS", "Associate", "Partner"}
 
 
 class QSOverrideService:
@@ -13,12 +8,15 @@ class QSOverrideService:
         self.storage = storage_backend
 
     def submit_override(self, item_id, old_qty, new_qty, reason, qs_id):
+        if not reason or not reason.strip():
+            raise InvalidOverrideError("QS override requires a written reason")
+
         evidence = capture_evidence(
             category="override",
             source="qs_override_service",
             description="QS quantity override submitted",
             payload={
-                "item_id": item_id,
+                "boq_item_code": item_id,
                 "old_quantity": old_qty,
                 "new_quantity": new_qty,
                 "reason": reason,
@@ -27,15 +25,17 @@ class QSOverrideService:
         )
 
         record = QSOverrideRecord(
-            item_id=item_id,
-            old_quantity=old_qty,
-            new_quantity=new_qty,
+            boq_item_code=item_id,
+            base_quantity=old_qty,
+            overridden_quantity=new_qty,
             reason=reason,
-            submitted_by=qs_id,
-            status="PENDING_APPROVAL",
-            evidence=[evidence],
+            created_by=qs_id,
+            approval_state="SUBMITTED",
         )
 
-        self.storage.save_override(record)
+        if hasattr(self.storage, "save_override"):
+            self.storage.save_override(record)
+
         return record
+
 
