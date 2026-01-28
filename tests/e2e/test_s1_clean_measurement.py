@@ -1,3 +1,4 @@
+import pytest
 from qs_ai.geometry_rules import plastering_rule
 
 def test_clean_measurement_generates_defensible_quantity(

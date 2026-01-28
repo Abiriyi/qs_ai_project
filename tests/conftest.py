@@ -1,10 +1,11 @@
 import pytest
 import sys
 from pathlib import Path
-from qs_ai.measurement_context import MeasurementContext 
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+
+from qs_ai.measurement_context import MeasurementContext 
 
 @pytest.fixture
 def simple_geometry():

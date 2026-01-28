@@ -15,7 +15,7 @@ def test_override_requires_approval_before_application():
         qs_id="qs_001",
     )
 
-    assert override["status"] == "PENDING_APPROVAL"
+    assert override.approval_state == "SUBMITTED"
 
 
 def test_override_without_reason_fails():

@@ -18,3 +18,11 @@ def default_context():
         scale_confidence=1.0,
         storey_height_confidence=1.0,
     )
+
+@pytest.fixture
+def confirmed_context(default_context):
+    """
+    Alias for readability in E2E tests.
+    Represents a QS-confirmed measurement context.
+    """
+    return default_context
