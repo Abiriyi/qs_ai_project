@@ -187,3 +187,13 @@ Build fails if:
 ## Early Prototype Notes (Historical)
 
 Initial versions of this project focused on PDF text extraction and geometry parsing. The system has since evolved into a full tribunal‑grade QS and claims platform.
+
+### Evidence Immutability
+
+All evidence records are:
+- Append-only
+- Hash-chained
+- Python-level immutable
+- Verified prior to tribunal export
+
+Any post-creation alteration is cryptographically detectable.
