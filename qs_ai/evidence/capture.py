@@ -2,6 +2,7 @@ from uuid import uuid4
 from datetime import datetime
 from qs_ai.evidence.models import EvidenceArtifact
 from qs_ai.version import get_release_identity
+from qs_ai.system.fingerprint import dependency_fingerprint
 
 def capture_evidence(
     category: str,

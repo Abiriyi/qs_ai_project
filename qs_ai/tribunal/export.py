@@ -1,5 +1,6 @@
 from qs_ai.tribunal.models import TribunalPack
 from qs_ai.version import get_release_identity
+from qs_ai.system.fingerprint import dependency_fingerprint
 
 def generate_tribunal_pack(
     project_id: str,

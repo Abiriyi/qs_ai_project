@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from typing import List
-
+from qs_ai.system.fingerprint import dependency_fingerprint
 
 @dataclass
 class TribunalPack:
