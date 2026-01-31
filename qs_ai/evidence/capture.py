@@ -1,7 +1,7 @@
 from uuid import uuid4
 from datetime import datetime
 from qs_ai.evidence.models import EvidenceArtifact
-
+from qs_ai.version import get_release_identity
 
 def capture_evidence(
     category: str,

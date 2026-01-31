@@ -9,4 +9,4 @@ class TribunalPack:
     approvals: List
     evidence: List
     status: str
-
+    system_release: str

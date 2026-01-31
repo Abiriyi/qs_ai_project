@@ -1,5 +1,5 @@
 from qs_ai.tribunal.models import TribunalPack
-
+from qs_ai.version import get_release_identity
 
 def generate_tribunal_pack(
     project_id: str,
@@ -15,6 +15,7 @@ def generate_tribunal_pack(
         claims=claims or [],
         approvals=approvals,
         evidence=evidence or [],
+        system_release=get_release_identity(),
         status="READY_FOR_TRIBUNAL",
     )
 
