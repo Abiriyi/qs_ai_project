@@ -10,4 +10,7 @@ __pycache__/
 htmlcov/
 qs_ai/tribunal/pdf_bundle/output/
 *.pdf
+# Allow tribunal-grade sealed PDFs
+!docs/tribunal/**/*.pdf
+!docs/tribunal/**/*.sha256
 .CommandsFolder
