@@ -1,0 +1,51 @@
+{
+  "project": "QS AI",
+  "release_version": "v1.0.0",
+  "release_status": "FROZEN",
+  "release_purpose": "Tribunal-defensible quantity surveying evidence pack",
+  "frozen_at_git_tag": "v1.0.0",
+
+  "maintainer": {
+    "name": "Casimir Kariyik ABIRIYI",
+    "profession": "Quantity Surveyor",
+    "professional_body": "Nigerian Institute of Quantity Surveyors (NIQS)",
+    "registration": "Quantity Surveyors Registration Board of Nigeria (QSRBN)"
+  },
+
+  "evidence_policy": {
+    "hash_algorithm": "SHA-256",
+    "mutation_policy": "No modification permitted after freeze",
+    "signature_policy": "Human expert signature only"
+  },
+
+  "artefacts": [
+    {
+      "id": "T1",
+      "filename": "expert_declaration_unsigned_v1.0.0.pdf",
+      "type": "Expert Declaration",
+      "status": "Unsigned",
+      "hash_file": "expert_declaration_unsigned_v1.0.0.sha256",
+      "description": "Unsigned expert declaration prepared for execution"
+    },
+    {
+      "id": "T2",
+      "filename": "expert_declaration_signed_v1.0.0.pdf",
+      "type": "Expert Declaration",
+      "status": "Signed",
+      "hash_file": "expert_declaration_signed_v1.0.0.sha256",
+      "description": "Expert declaration signed and dated by the named expert"
+    },
+    {
+      "id": "T3",
+      "filename": "tribunal_index_v1.0.0.pdf",
+      "type": "Tribunal Index",
+      "status": "Final",
+      "hash_file": "tribunal_index_v1.0.0.sha256",
+      "description": "Index of all tribunal documents and their status"
+    }
+  ],
+
+  "integrity_statement": "All artefacts listed herein were hash-verified at the time of release freeze. Any alteration invalidates this manifest.",
+
+  "legal_notice": "This manifest is declaratory only and does not replace expert testimony or tribunal directions."
+}
