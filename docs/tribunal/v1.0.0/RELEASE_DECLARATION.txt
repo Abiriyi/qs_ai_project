@@ -1,0 +1,10 @@
+QS AI v1.0.0 — RELEASE DECLARATION
+
+This release is frozen as at the Git tag v1.0.0.
+
+All tribunal artefacts contained herein are hash-sealed.
+No further modifications are permitted to this release.
+
+Signed:
+Casimir Kariyik ABIRIYI
+Date: [insert date]
