@@ -51,6 +51,14 @@
       "hash_file": "TRIBUNAL_SUBMISSION_COVER_NOTE_v1.0.0.sha256",
       "sha256": "84420717e2ffac550d4b7cfc62dec2da527779b17f4f3356b2dd72ad9798128b",
       "description": "Formal tribunal submission cover note accompanying the sealed evidence bundle"
+    },
+    {
+      "id": "T5",
+      "filename": "QS_AI_v1.0.0_FORMAL_RELEASE_CLOSURE_DECLARATION.pdf",
+      "type": "Release Closure Declaration",
+      "status": "Final (Procedural)",
+      "hash_file": "QS_AI_v1.0.0_FORMAL_RELEASE_CLOSURE_DECLARATION.sha256",
+      "description": "Formal declaration confirming v1.0.0 sealed and frozen"
     }
   ],
 
@@ -58,4 +66,3 @@
 
   "legal_notice": "This manifest is declaratory only and does not replace expert testimony or tribunal directions."
 }
-
