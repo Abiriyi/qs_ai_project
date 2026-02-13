@@ -42,6 +42,15 @@
       "status": "Final",
       "hash_file": "tribunal_index_v1.0.0.sha256",
       "description": "Index of all tribunal documents and their status"
+    },
+    {
+      "id": "T4",
+      "filename": "TRIBUNAL_SUBMISSION_COVER_NOTE_v1.0.0.pdf",
+      "type": "Procedural Cover Note",
+      "status": "Final (Non-Evidential)",
+      "hash_file": "TRIBUNAL_SUBMISSION_COVER_NOTE_v1.0.0.sha256",
+      "sha256": "84420717e2ffac550d4b7cfc62dec2da527779b17f4f3356b2dd72ad9798128b",
+      "description": "Formal tribunal submission cover note accompanying the sealed evidence bundle"
     }
   ],
 
@@ -49,3 +58,4 @@
 
   "legal_notice": "This manifest is declaratory only and does not replace expert testimony or tribunal directions."
 }
+
