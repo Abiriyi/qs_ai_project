@@ -59,7 +59,15 @@
       "status": "Final (Procedural)",
       "hash_file": "QS_AI_v1.0.0_FORMAL_RELEASE_CLOSURE_DECLARATION.sha256",
       "description": "Formal declaration confirming v1.0.0 sealed and frozen"
-    }
+    },
+    {
+  "id": "T6",
+  "filename": "TRIBUNAL_CLERK_VERIFICATION_INSTRUCTIONS_v1.0.0.pdf",
+  "type": "Verification Instructions",
+  "status": "Final (Procedural)",
+  "hash_file": "TRIBUNAL_CLERK_VERIFICATION_INSTRUCTIONS_v1.0.0.sha256",
+  "description": "Instructions for Tribunal Clerk to verify archive integrity"
+}
   ],
 
   "integrity_statement": "All artefacts listed herein were hash-verified at the time of release freeze. Any alteration invalidates this manifest.",
